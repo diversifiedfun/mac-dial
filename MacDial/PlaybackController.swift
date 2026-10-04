@@ -41,6 +41,13 @@ func HIDPostAuxKey(key: Int32, modifiers: [NSEvent.ModifierFlags], _repeat: Int 
 class PlaybackController : Controller {
     
     var lastClick = -TimeInterval.infinity
+    private let post: (Int32, [NSEvent.ModifierFlags], Int) -> Void
+
+    init(post: @escaping (Int32, [NSEvent.ModifierFlags], Int) -> Void = {
+        HIDPostAuxKey(key: $0, modifiers: $1, _repeat: $2)
+    }) {
+        self.post = post
+    }
 
     func onCancel() {
         lastClick = -TimeInterval.infinity
@@ -57,13 +64,13 @@ class PlaybackController : Controller {
         // Next song on double click
         if (clickDelay < 0.5) {
             // Undo pause sent on first click
-            HIDPostAuxKey(key: NX_KEYTYPE_PLAY, modifiers: [], _repeat: 1)
+            post(NX_KEYTYPE_PLAY, [], 1)
             
-            HIDPostAuxKey(key: NX_KEYTYPE_NEXT, modifiers: [])
+            post(NX_KEYTYPE_NEXT, [], 1)
         }
         else { // Play / Pause on single click
             
-            HIDPostAuxKey(key: NX_KEYTYPE_PLAY, modifiers: [], _repeat: 1)
+            post(NX_KEYTYPE_PLAY, [], 1)
         }
         
         lastClick = Date().timeIntervalSince1970
@@ -77,10 +84,10 @@ class PlaybackController : Controller {
         
         switch (rotation) {
         case .Clockwise(let _repeat):
-            HIDPostAuxKey(key: NX_KEYTYPE_SOUND_UP, modifiers: modifiers, _repeat: _repeat)
+            post(NX_KEYTYPE_SOUND_UP, modifiers, _repeat)
             break
         case .CounterClockwise(let _repeat):
-            HIDPostAuxKey(key: NX_KEYTYPE_SOUND_DOWN, modifiers: modifiers, _repeat: _repeat)
+            post(NX_KEYTYPE_SOUND_DOWN, modifiers, _repeat)
 
             break
         }

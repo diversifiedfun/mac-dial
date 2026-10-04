@@ -185,10 +185,8 @@ class Dial
     private var run: Bool = false
     let device = Device()
     private let semaphore = DispatchSemaphore(value: 0)
-    private var lastButtonState = ButtonState.released
     
-    var onButtonStateChanged: ((ButtonState) -> Void)?
-    var onRotation: ((Rotation, Int) -> Void)?
+    var onInput: ((InputReport, TimeInterval) -> Void)?
     var onDisconnected: (() -> Void)?
     
     var wheelSensitivity: Int {
@@ -289,26 +287,14 @@ class Dial
                 switch device.read() {
                 
                 case .dial(let buttonState, let rotation):
-                    
-                    switch buttonState {
-                    case .pressed where lastButtonState == .released:
-                        onButtonStateChanged?(.pressed)
-                    case .released where lastButtonState == .pressed:
-                        onButtonStateChanged?(.released)
-                    default: break
-                    }
-                    
-                    if rotation != nil {
-                        onRotation?(rotation!, scrollDirection)
-                    }
-                    
-                    self.lastButtonState = buttonState
-                
+                    // Deliver one complete report. The main-queue router must
+                    // consume a confirmation release and its rotation together.
+                    onInput?(.dial(buttonState, rotation), ProcessInfo.processInfo.systemUptime)
+
                 case .unknown:
                     print("Unknown input report.")
                 case nil:
                     print("Device disconnected.")
-                    lastButtonState = .released
                     onDisconnected?()
                 }
             }

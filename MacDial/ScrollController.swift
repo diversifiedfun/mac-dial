@@ -18,10 +18,9 @@ class ScrollController: Controller
     }
     
     private func sendMouse(button direction: Direction) {
-        let mousePos = NSEvent.mouseLocation
-        let screenHeight = NSScreen.main?.frame.height ?? 0
-        
-        let translatedMousePos = NSPoint(x: mousePos.x, y: screenHeight - mousePos.y)
+        // Read the pointer in Quartz's desktop coordinate space directly.
+        // NSScreen.main can change while a nonactivating panel has key focus.
+        let translatedMousePos = CGEvent(source: nil)?.location ?? .zero
         
         let event = CGEvent(mouseEventSource: nil, mouseType: direction == .down ? .leftMouseDown : .leftMouseUp, mouseCursorPosition: translatedMousePos, mouseButton: .left)
         

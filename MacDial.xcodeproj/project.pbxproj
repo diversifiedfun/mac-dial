@@ -21,6 +21,11 @@
 		C89F315F270126E100A8B365 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C89F315E270126E100A8B365 /* AppKit.framework */; };
 		F00100000000000000000002 /* DialButtonHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000001 /* DialButtonHandler.swift */; };
 		F00200000000000000000002 /* ZoomController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00200000000000000000001 /* ZoomController.swift */; };
+		F00300000000000000000002 /* Mode.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00300000000000000000001 /* Mode.swift */; };
+		F00400000000000000000002 /* ModePickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00400000000000000000001 /* ModePickerState.swift */; };
+		F00500000000000000000002 /* DialInputCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00500000000000000000001 /* DialInputCoordinator.swift */; };
+		F00600000000000000000002 /* RadialMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00600000000000000000001 /* RadialMenuView.swift */; };
+		F00700000000000000000002 /* RadialMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00700000000000000000001 /* RadialMenuController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +47,11 @@
 		C89F315E270126E100A8B365 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		F00100000000000000000001 /* DialButtonHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialButtonHandler.swift; sourceTree = "<group>"; };
 		F00200000000000000000001 /* ZoomController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomController.swift; sourceTree = "<group>"; };
+		F00300000000000000000001 /* Mode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Mode.swift; sourceTree = "<group>"; };
+		F00400000000000000000001 /* ModePickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModePickerState.swift; sourceTree = "<group>"; };
+		F00500000000000000000001 /* DialInputCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialInputCoordinator.swift; sourceTree = "<group>"; };
+		F00600000000000000000001 /* RadialMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuView.swift; sourceTree = "<group>"; };
+		F00700000000000000000001 /* RadialMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +93,11 @@
 				C882FA2C26F143E300595EE1 /* StatusBarController.swift */,
 				F00100000000000000000001 /* DialButtonHandler.swift */,
 				F00200000000000000000001 /* ZoomController.swift */,
+				F00700000000000000000001 /* RadialMenuController.swift */,
+				F00600000000000000000001 /* RadialMenuView.swift */,
+				F00500000000000000000001 /* DialInputCoordinator.swift */,
+				F00400000000000000000001 /* ModePickerState.swift */,
+				F00300000000000000000001 /* Mode.swift */,
 				C89D24282703BA5E00B1A458 /* Controller.swift */,
 				C882FA1D26F1430D00595EE1 /* Assets.xcassets */,
 				C882FA2226F1430D00595EE1 /* Main.storyboard */,
@@ -188,6 +203,11 @@
 				C882FA1A26F1430C00595EE1 /* AppDelegate.swift in Sources */,
 				F00100000000000000000002 /* DialButtonHandler.swift in Sources */,
 				F00200000000000000000002 /* ZoomController.swift in Sources */,
+				F00700000000000000000002 /* RadialMenuController.swift in Sources */,
+				F00600000000000000000002 /* RadialMenuView.swift in Sources */,
+				F00500000000000000000002 /* DialInputCoordinator.swift in Sources */,
+				F00400000000000000000002 /* ModePickerState.swift in Sources */,
+				F00300000000000000000002 /* Mode.swift in Sources */,
 				C89D24292703BA5E00B1A458 /* Controller.swift in Sources */,
 				C89D242D2704870C00B1A458 /* PlaybackController.swift in Sources */,
 				C89F31592701090400A8B365 /* Dial.swift in Sources */,

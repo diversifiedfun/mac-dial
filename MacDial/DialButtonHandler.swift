@@ -1,13 +1,15 @@
 import Foundation
 
-// Used on the main queue. Keep the controller that received down until the
-// gesture ends, so a mode change cannot deliver up to a different controller.
+// Main-queue gesture recognition, independent of controller actions.
+// Nothing posts mouse/key down until a short press has been recognized.
 final class DialButtonHandler {
     static let longPressThreshold: TimeInterval = 0.6
 
+    var onShortPress: (() -> Void)?
     var onLongPress: (() -> Void)?
+    var onLongPressRelease: (() -> Void)?
     private(set) var longPressActive = false
-    private var pressedController: Controller?
+    var isPressed: Bool { pressStart != nil }
     private var pressStart: TimeInterval?
     private var timer: DispatchWorkItem?
     private var generation = 0
@@ -24,35 +26,41 @@ final class DialButtonHandler {
 
     deinit { timer?.cancel() }
 
-    func pressed(controller: Controller) {
+    func pressed(at timestamp: TimeInterval? = nil) {
         guard pressStart == nil else { return }
         generation += 1
         let currentGeneration = generation
-        pressStart = now()
-        pressedController = controller
+        let start = timestamp ?? now()
+        pressStart = start
         longPressActive = false
-        controller.onDown()
 
         let work = DispatchWorkItem { [weak self] in
             guard let self = self, self.generation == currentGeneration else { return }
             self.fireLongPress()
         }
         timer = work
-        schedule(Self.longPressThreshold, work)
+        schedule(max(0, Self.longPressThreshold - (now() - start)), work)
     }
 
-    func released() {
-        guard let start = pressStart else { return }
-        // A busy main queue may deliver release before its overdue timer.
-        if now() - start >= Self.longPressThreshold {
+    func advance(at timestamp: TimeInterval? = nil) {
+        if let start = pressStart, (timestamp ?? now()) - start >= Self.longPressThreshold {
             fireLongPress()
         }
-        if !longPressActive { pressedController?.onUp() }
+    }
+
+    func released(at timestamp: TimeInterval? = nil) {
+        guard isPressed else { return }
+        let currentGeneration = generation
+        // A busy main queue may deliver release before its overdue timer.
+        advance(at: timestamp)
+        // A long-press callback may cancel this gesture while closing a menu.
+        guard generation == currentGeneration else { return }
+        let callback = longPressActive ? onLongPressRelease : onShortPress
         clear()
+        callback?()
     }
 
     func cancel() {
-        pressedController?.onCancel()
         clear()
     }
 
@@ -61,8 +69,6 @@ final class DialButtonHandler {
         timer?.cancel()
         timer = nil
         longPressActive = true
-        pressedController?.onCancel()
-        pressedController = nil
         onLongPress?()
     }
 
@@ -70,7 +76,6 @@ final class DialButtonHandler {
         timer?.cancel()
         timer = nil
         generation += 1
-        pressedController = nil
         pressStart = nil
         longPressActive = false
     }

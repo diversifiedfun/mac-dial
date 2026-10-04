@@ -14,17 +14,6 @@ enum ScrollDirection: String {
     case natural = "natural"
 }
 
-enum Mode: String, CaseIterable {
-    case scrolling = "scrolling"
-    case playback = "playback"
-    case zoom = "zoom"
-
-    var next: Mode {
-        let index = Self.allCases.firstIndex(of: self)!
-        return Self.allCases[(index + 1) % Self.allCases.count]
-    }
-}
-
 enum HapticsMode: String {
     case enabled = "enabled"
     case disabled = "disabled"
@@ -115,7 +104,10 @@ class StatusBarController
     private let menu: NSMenu
     private let dial: Dial
     private let menuItems = MenuItems()
-    private let buttonHandler = DialButtonHandler()
+    private lazy var input = DialInputCoordinator(currentMode: { [weak self] in self?.currentMode ?? .scrolling })
+    private let radialMenu = RadialMenuController()
+    private var connectionTimer: Timer?
+    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     
     struct MenuItems {
         let title = NSMenuItem.init(title: "Mac Dial")
@@ -124,7 +116,15 @@ class StatusBarController
         let scrollMode = ControllerOptionItem.init(title: "Scroll mode", mode: .scrolling, controller: ScrollController())
         let playbackMode = ControllerOptionItem.init(title: "Playback mode", mode: .playback, controller: PlaybackController())
         let zoomMode = ControllerOptionItem(title: "Zoom mode", mode: .zoom, controller: ZoomController())
-        var modeItems: [ControllerOptionItem] { [scrollMode, playbackMode, zoomMode] }
+        var modeItems: [ControllerOptionItem] {
+            Mode.allCases.map { mode in
+                switch mode {
+                case .scrolling: return scrollMode
+                case .playback: return playbackMode
+                case .zoom: return zoomMode
+                }
+            }
+        }
         let separator2 = NSMenuItem.separator()
         let wheelSensitivity = NSMenuItem.init(title: "Wheel Sensitivity")
         let wheelSensitivityOptions = [
@@ -147,35 +147,11 @@ class StatusBarController
         let quit = NSMenuItem.init(title: "Quit")
     }
     
-    var currentMode: Mode
-    {
-        get {
-            switch UserDefaults.standard.string(forKey: "mode")
-            {
-            case .some("scroll"):
-                return .scrolling
-            case .some("playback"):
-                return .playback
-            case .some("zoom"):
-                return .zoom
-            default:
-                return .scrolling
-            }
-        }
-        
-        set (value) {
-            switch (value)
-            {
-            case .playback:
-                UserDefaults.standard.setValue("playback", forKey: "mode")
-            case .scrolling:
-                UserDefaults.standard.setValue("scroll", forKey: "mode")
-            case .zoom:
-                UserDefaults.standard.setValue("zoom", forKey: "mode")
-            }
-        }
+    var currentMode: Mode {
+        get { Mode(savedValue: UserDefaults.standard.string(forKey: "mode")) }
+        set { UserDefaults.standard.setValue(newValue.savedValue, forKey: "mode") }
     }
-    
+
     var currentController: Controller
     {
         get {
@@ -328,40 +304,70 @@ class StatusBarController
             updateIcon()
         }
         
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self]_ in
+        connectionTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self]_ in
             self?.updateConnectionStatus()
         }
         
-        buttonHandler.onLongPress = { [weak self] in
-            guard let self = self else { return }
-            self.applyMode(self.currentMode.next)
+        input.onShortPress = { [weak self] in
+            guard let controller = self?.currentController else { return }
+            controller.onDown()
+            controller.onUp()
+        }
+        input.onRotation = { [weak self] rotation, direction in
+            self?.currentController.onRotate(rotation, direction)
+        }
+        input.onCancelAction = { [weak self] in self?.currentController.onCancel() }
+        input.onCommit = { [weak self] mode in self?.applyMode(mode) }
+        input.onFeedback = { [weak self] in
+            guard let self = self, self.hapticsMode == .enabled else { return }
             self.dial.device.impact()
         }
+        input.onPickerChanged = { [weak self] state in
+            guard let self = self else { return }
+            if let state = state { self.radialMenu.show(state) }
+            else { self.radialMenu.dismiss() }
+        }
+        radialMenu.view.onHighlight = { [weak self] mode in self?.input.highlight(mode) }
+        radialMenu.view.onMove = { [weak self] steps in self?.input.moveSelection(by: steps) }
+        radialMenu.view.onConfirm = { [weak self] in self?.input.confirmSelection() }
+        radialMenu.view.onSelect = { [weak self] mode in
+            self?.input.highlight(mode)
+            self?.input.confirmSelection()
+        }
+        radialMenu.view.onCancel = { [weak self] in self?.cancelPendingInput() }
 
-        dial.onButtonStateChanged = { [weak self] state in
+        dial.onInput = { [weak self] report, timestamp in
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                switch state {
-                case .pressed:
-                    self.buttonHandler.pressed(controller: self.currentController)
-                case .released:
-                    self.buttonHandler.released()
-                }
+                guard let self = self, case let .dial(button, rotation) = report else { return }
+                self.input.handle(button: button, rotation: rotation,
+                                  sensitivity: self.dial.wheelSensitivity,
+                                  scrollDirection: self.dial.scrollDirection, timestamp: timestamp)
             }
         }
-        
-        dial.onRotation = { [weak self] rotation, scrollDirection in
-            DispatchQueue.main.async {
-                guard let self = self, !self.buttonHandler.longPressActive else { return }
-                self.currentController.onRotate(rotation, scrollDirection)
-            }
-        }
-
         dial.onDisconnected = { [weak self] in
             DispatchQueue.main.async { self?.cancelPendingInput() }
         }
+
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification,
+                     NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            observe(workspace, name)
+        }
+        observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
     }
-    
+
+    deinit {
+        connectionTimer?.invalidate()
+        for (center, observer) in observers { center.removeObserver(observer) }
+    }
+
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name) {
+        let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            self?.cancelPendingInput()
+        }
+        observers.append((center, observer))
+    }
+
     private func updateConnectionStatus() {
         if !AXIsProcessTrusted() {
             menuItems.connectionStatus.title = "Accessibility permission required"
@@ -392,7 +398,7 @@ class StatusBarController
             button.image?.isTemplate = true
             button.image?.size = NSSize(width: 18, height: 18)
             let modeTitle = menuItems.modeItems.first { $0.selected }?.title ?? "Mac Dial"
-            button.toolTip = "Mac Dial — \(modeTitle). Hold the Dial to switch modes."
+            button.toolTip = "Mac Dial — \(modeTitle). Hold, release, turn, then click to choose a mode."
             
             button.imagePosition = .imageLeft
         }
@@ -409,8 +415,7 @@ class StatusBarController
     }
 
     func cancelPendingInput() {
-        buttonHandler.cancel()
-        currentController.onCancel()
+        input.cancel()
     }
 
     private func applyMode(_ mode: Mode) {

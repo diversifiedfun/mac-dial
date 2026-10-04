@@ -82,6 +82,12 @@ extension NSMenu {
             items.wheelSensitivity.submenu?.addItem(sensitivityOption)
         }
         self.addItem(items.wheelSensitivity)
+
+        items.menuPressDuration.submenu = NSMenu()
+        for option in items.menuPressDurationOptions {
+            items.menuPressDuration.submenu?.addItem(option)
+        }
+        self.addItem(items.menuPressDuration)
         
         items.scrollDirection.submenu = NSMenu.init()
         for scrollDirectionOption in items.scrollDirectionOptions {
@@ -139,6 +145,10 @@ class StatusBarController
             MenuOptionItem<WheelSensitivity>.init(title: "High", option: .high),
             MenuOptionItem<WheelSensitivity>.init(title: "Extreme", option: .extreme)
         ]
+        let menuPressDuration = NSMenuItem(title: "Menu Press Duration")
+        let menuPressDurationOptions = MenuPressDuration.allCases.map {
+            MenuOptionItem(title: "\($0.rawValue) ms", option: $0)
+        }
         let scrollDirection = NSMenuItem.init(title: "Scroll Direction")
         let scrollDirectionOptions = [
             MenuOptionItem<ScrollDirection>.init(title: "Standard", option: .standard),
@@ -188,6 +198,17 @@ class StatusBarController
         }
     }
     
+    var menuPressDuration: MenuPressDuration {
+        get { MenuPressDuration.load() }
+        set {
+            input.menuPressDuration = newValue
+            for option in menuItems.menuPressDurationOptions {
+                option.selected = option.option == newValue
+            }
+            newValue.save()
+        }
+    }
+
     var scrollDirection: ScrollDirection? {
         get {
             let raw = UserDefaults.standard.string(forKey: "direction") ?? ScrollDirection.natural.rawValue
@@ -272,6 +293,12 @@ class StatusBarController
             option.selected = option.option == wheelSensitivity
         }
         wheelSensitivity = wheelSensitivity // trigger set which updates dial
+
+        for option in menuItems.menuPressDurationOptions {
+            option.target = self
+            option.action = #selector(setMenuPressDuration(sender:))
+        }
+        menuPressDuration = menuPressDuration // restore timing and the checkmark at launch
         
         for option in menuItems.scrollDirectionOptions {
             option.target = self
@@ -457,6 +484,11 @@ class StatusBarController
     @objc func setScrollDirection(sender: AnyObject) {
         let item = sender as! NSMenuItem
         scrollDirection = (item.representedObject as! ScrollDirection)
+    }
+
+    @objc func setMenuPressDuration(sender: AnyObject) {
+        let item = sender as! MenuOptionItem<MenuPressDuration>
+        menuPressDuration = item.option
     }
     
     @objc func setHaptics(sender: AnyObject) {

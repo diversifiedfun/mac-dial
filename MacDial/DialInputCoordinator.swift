@@ -12,6 +12,11 @@ final class DialInputCoordinator {
     var onFeedback: (() -> Void)?
     private(set) var picker: ModePickerState?
 
+    var menuPressDuration: MenuPressDuration {
+        get { button.menuPressDuration }
+        set { button.menuPressDuration = newValue }
+    }
+
     private let currentMode: () -> Mode
     private let currentProfile: () -> AppProfile?
     private let button: DialButtonHandler

@@ -19,8 +19,11 @@ The app supports three general modes, plus contextual Lightroom Classic modes:
 
 ### Radial mode picker
 
-Hold the Dial for **600 ms**, release, turn to highlight a mode, then click to
-select it. A 300-point native macOS wheel opens at the pointer and stays within
+Hold the Dial for **600 ms** by default, release, turn to highlight a mode, then
+click to select it. Choose **Menu Press Duration** in the menu bar, beside Wheel
+Sensitivity, to use **200, 300, 400, 500, or 600 ms**. The choice is saved across
+launches and applies to the next press, including a second hold to cancel the
+picker. A 300-point native macOS wheel opens at the pointer and stays within
 that display's visible area. Scroll is at the top, Playback at the lower right,
 and Zoom at the lower left. The center names the highlighted mode.
 
@@ -117,8 +120,8 @@ CMake is not required. The local deployment target is macOS 12 or later.
 The resulting app is in `../build/Build/Products/Release/MacDial.app`.
 
 The installed copy is `/Applications/MacDial.app`; building does not replace it.
-The Lightroom build is packaged at
-`../downloads/MacDial-lightroom-modes-arm64.app.zip`. Earlier archives are retained.
+The build with configurable press duration is packaged at
+`../downloads/MacDial-press-duration-arm64.app.zip`. Earlier archives are retained.
 The local build is ad-hoc signed.
 
 Before a physical Dial check, quit the installed Mac Dial copy, then open
@@ -129,8 +132,8 @@ require removing and re-adding it under Privacy & Security > Accessibility
 
 ### Verification and preview
 
-- `bash Tests/run.sh` runs hardware-independent checks of press timing (including
-  queued HID timestamps), short clicks, menu routing, cancellation, selection
+- `bash Tests/run.sh` runs hardware-independent checks of all five press durations
+  (including queued HID timestamps and changes during a hold), short clicks, menu routing, cancellation, selection
   normalization, preference compatibility, multi-display placement, and actual
   controller events recorded without posting input to the desktop.
 - `bash Tests/render.sh` checks the native view's accessibility and input handlers
@@ -147,8 +150,9 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The Lightroom build, strict code-signature verification, 247 recording-only
-behavior checks, and 352 native-view checks pass. Automated checks cover all six
+The configurable-duration build, strict code-signature verification, and 403
+recording-only behavior checks pass. The prior Lightroom build also passed 352
+native-view checks. Automated checks cover all six
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, and placement on displays with negative coordinates.

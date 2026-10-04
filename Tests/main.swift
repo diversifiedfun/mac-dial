@@ -64,7 +64,7 @@ final class Harness {
     }
     func open() {
         report(.pressed)
-        clock.advance(0.6)
+        clock.advance(input.menuPressDuration.seconds)
         report(.released)
     }
     func click() {
@@ -74,32 +74,101 @@ final class Harness {
     }
 }
 
-// Exact threshold, including release before an overdue timer is delivered.
-for duration in [0.0, 0.599, 0.6, 0.601, 3.0] {
-    let h = Harness()
-    h.report(.pressed)
-    h.report(.pressed)
-    check(h.clicks == 0, "Pressing must not immediately click")
-    h.clock.time = duration
-    h.report(.released)
-    h.report(.released)
-    if duration < 0.6 {
-        check(h.clicks == 1 && h.input.picker == nil, "Short press clicks exactly once")
-    } else {
-        check(h.clicks == 0 && h.input.picker?.isArmed == true, "Overdue long press opens and arms")
-        check(h.mode == .scrolling && h.commits.isEmpty, "Opening never changes the active mode")
+check(Harness().input.menuPressDuration == .ms600, "Existing users retain the 600 ms default")
+
+do {
+    let suite = "MacDial.MenuPressDurationTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    check(MenuPressDuration.load(from: defaults) == .ms600, "Missing preference defaults to 600 ms")
+    for option in MenuPressDuration.allCases {
+        option.save(to: defaults)
+        check(MenuPressDuration.load(from: UserDefaults(suiteName: suite)!) == option,
+              "Every duration is restored from saved preferences")
+    }
+    for invalid in [-1, 0, 250, 1000] {
+        defaults.set(invalid, forKey: "menuPressDuration")
+        check(MenuPressDuration.load(from: defaults) == .ms600, "Unsupported preference defaults to 600 ms")
     }
 }
 
-// Reports timestamped on the HID thread retain the physical hold duration
-// even when both edges wait behind a busy main queue.
-for duration in [0.1, 0.599, 0.6, 1.0] {
+// Every choice uses the same boundary for its timer and HID timestamps,
+// including release before an overdue timer is delivered.
+for option in MenuPressDuration.allCases {
+    let threshold = option.seconds
+    for duration in [0.0, threshold - 0.001, threshold, threshold + 0.001, 3.0] {
+        let h = Harness()
+        h.input.menuPressDuration = option
+        h.report(.pressed)
+        h.report(.pressed)
+        check(h.clicks == 0, "Pressing must not immediately click")
+        h.clock.time = duration
+        h.report(.released)
+        h.report(.released)
+        if duration < threshold {
+            check(h.clicks == 1 && h.input.picker == nil, "Short press clicks exactly once")
+        } else {
+            check(h.clicks == 0 && h.input.picker?.isArmed == true, "Overdue long press opens and arms")
+            check(h.mode == .scrolling && h.commits.isEmpty, "Opening never changes the active mode")
+        }
+    }
+
+    // Reports timestamped on the HID thread retain the physical hold duration
+    // even when both edges wait behind a busy main queue.
+    for duration in [0.1, threshold - 0.001, threshold, 1.0] {
+        let h = Harness()
+        h.input.menuPressDuration = option
+        h.clock.time = 10
+        h.input.handle(button: .pressed, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: 0)
+        h.input.handle(button: .released, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: duration)
+        check(h.clicks == (duration < threshold ? 1 : 0), "Queued reports preserve real press duration")
+        check((h.input.picker != nil) == (duration >= threshold), "A main-queue stall cannot misclassify a hold")
+        let presentations = h.presentations
+        h.clock.advance(1)
+        check(h.presentations == presentations, "Late timers cannot open or duplicate a released gesture")
+    }
+
     let h = Harness()
-    h.clock.time = 10
-    h.input.handle(button: .pressed, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: 0)
-    h.input.handle(button: .released, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: duration)
-    check(h.clicks == (duration < 0.6 ? 1 : 0), "Queued reports preserve real press duration")
-    check((h.input.picker != nil) == (duration >= 0.6), "A main-queue stall cannot misclassify a hold")
+    h.input.menuPressDuration = option
+    h.report(.pressed)
+    h.clock.advance(threshold - 0.001)
+    check(h.input.picker == nil, "Timer cannot open the menu before the selected duration")
+    h.clock.time = threshold
+    h.clock.advance(0)
+    check(h.input.picker?.isArmed == false && h.clicks == 0, "Timer opens at the selected duration without clicking")
+    h.report(.released)
+    check(h.input.picker?.isArmed == true, "Release arms the menu at every duration")
+    h.report(.pressed)
+    h.clock.advance(threshold + 0.001)
+    check(h.input.picker == nil && h.commits.isEmpty, "Second hold uses the selected duration to cancel")
+    h.report(.released)
+    h.click()
+    check(h.clicks == 1, "Short clicks resume after cancellation at every duration")
+}
+
+// Changing a preference mid-hold must not make the timer and release disagree.
+for (original, updated) in [(MenuPressDuration.ms600, MenuPressDuration.ms200), (.ms200, .ms600)] {
+    for timerFires in [false, true] {
+        let h = Harness()
+        h.input.menuPressDuration = original
+        h.report(.pressed)
+        h.input.menuPressDuration = updated
+        h.clock.time = original.seconds - 0.001
+        h.report(.pressed)
+        check(h.input.picker == nil, "Preference changes do not shorten a hold already in progress")
+        h.clock.time = original.seconds
+        if timerFires { h.clock.advance(0) }
+        h.report(.released)
+        check(h.input.picker?.isArmed == true && h.clicks == 0,
+              "Timer and release retain the original duration for an active hold")
+        h.input.cancel()
+        h.clock.time = 10
+        h.report(.pressed)
+        h.clock.advance(updated.seconds - 0.001)
+        check(h.input.picker == nil, "Next hold waits for the updated duration")
+        h.clock.advance(0.002)
+        check(h.input.picker?.isArmed == false, "Next hold uses the updated duration immediately")
+    }
 }
 
 do {

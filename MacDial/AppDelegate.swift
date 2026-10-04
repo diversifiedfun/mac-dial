@@ -31,7 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
+        statusBarController?.cancelPendingInput()
         dial.stop();
     }
 }
-

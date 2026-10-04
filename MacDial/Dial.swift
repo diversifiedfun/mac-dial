@@ -189,6 +189,7 @@ class Dial
     
     var onButtonStateChanged: ((ButtonState) -> Void)?
     var onRotation: ((Rotation, Int) -> Void)?
+    var onDisconnected: (() -> Void)?
     
     var wheelSensitivity: Int {
         get {
@@ -307,6 +308,8 @@ class Dial
                     print("Unknown input report.")
                 case nil:
                     print("Device disconnected.")
+                    lastButtonState = .released
+                    onDisconnected?()
                 }
             }
             

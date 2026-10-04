@@ -40,7 +40,11 @@ func HIDPostAuxKey(key: Int32, modifiers: [NSEvent.ModifierFlags], _repeat: Int 
 
 class PlaybackController : Controller {
     
-    var lastClick = Date().timeIntervalSince1970
+    var lastClick = -TimeInterval.infinity
+
+    func onCancel() {
+        lastClick = -TimeInterval.infinity
+    }
     
     func onDown() {
         

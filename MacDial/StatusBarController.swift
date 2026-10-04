@@ -14,9 +14,15 @@ enum ScrollDirection: String {
     case natural = "natural"
 }
 
-enum Mode: String {
+enum Mode: String, CaseIterable {
     case scrolling = "scrolling"
     case playback = "playback"
+    case zoom = "zoom"
+
+    var next: Mode {
+        let index = Self.allCases.firstIndex(of: self)!
+        return Self.allCases[(index + 1) % Self.allCases.count]
+    }
 }
 
 enum HapticsMode: String {
@@ -76,8 +82,7 @@ extension NSMenu {
         self.addItem(items.title)
         self.addItem(items.connectionStatus)
         self.addItem(items.separator)
-        self.addItem(items.scrollMode)
-        self.addItem(items.playbackMode)
+        for item in items.modeItems { self.addItem(item) }
         self.addItem(items.separator2)
         
         items.wheelSensitivity.submenu = NSMenu.init()
@@ -110,6 +115,7 @@ class StatusBarController
     private let menu: NSMenu
     private let dial: Dial
     private let menuItems = MenuItems()
+    private let buttonHandler = DialButtonHandler()
     
     struct MenuItems {
         let title = NSMenuItem.init(title: "Mac Dial")
@@ -117,6 +123,8 @@ class StatusBarController
         let separator = NSMenuItem.separator()
         let scrollMode = ControllerOptionItem.init(title: "Scroll mode", mode: .scrolling, controller: ScrollController())
         let playbackMode = ControllerOptionItem.init(title: "Playback mode", mode: .playback, controller: PlaybackController())
+        let zoomMode = ControllerOptionItem(title: "Zoom mode", mode: .zoom, controller: ZoomController())
+        var modeItems: [ControllerOptionItem] { [scrollMode, playbackMode, zoomMode] }
         let separator2 = NSMenuItem.separator()
         let wheelSensitivity = NSMenuItem.init(title: "Wheel Sensitivity")
         let wheelSensitivityOptions = [
@@ -148,6 +156,8 @@ class StatusBarController
                 return .scrolling
             case .some("playback"):
                 return .playback
+            case .some("zoom"):
+                return .zoom
             default:
                 return .scrolling
             }
@@ -160,6 +170,8 @@ class StatusBarController
                 UserDefaults.standard.setValue("playback", forKey: "mode")
             case .scrolling:
                 UserDefaults.standard.setValue("scroll", forKey: "mode")
+            case .zoom:
+                UserDefaults.standard.setValue("zoom", forKey: "mode")
             }
         }
     }
@@ -173,6 +185,8 @@ class StatusBarController
                 return menuItems.playbackMode.controller
             case .scrolling:
                 return menuItems.scrollMode.controller
+            case .zoom:
+                return menuItems.zoomMode.controller
             }
         }
     }
@@ -258,7 +272,7 @@ class StatusBarController
         self.dial = dial
         self.menu = NSMenu.init()
         
-        statusBar = NSStatusBar.init()
+        statusBar = NSStatusBar.system
         statusItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
         
         menu.minimumWidth = 260
@@ -274,13 +288,11 @@ class StatusBarController
         menuItems.connectionStatus.target = self
         menuItems.connectionStatus.isEnabled = false
         
-        menuItems.scrollMode.target = self
-        menuItems.scrollMode.action = #selector(setMode(sender:))
-        menuItems.scrollMode.selected = currentMode == .scrolling;
-        
-        menuItems.playbackMode.target = self
-        menuItems.playbackMode.action = #selector(setMode(sender:))
-        menuItems.playbackMode.selected = currentMode == .playback;
+        for item in menuItems.modeItems {
+            item.target = self
+            item.action = #selector(setMode(sender:))
+            item.selected = item.option == currentMode
+        }
         
         for option in menuItems.wheelSensitivityOptions {
             option.target = self
@@ -294,6 +306,7 @@ class StatusBarController
             option.action = #selector(setScrollDirection(sender:))
             option.selected = option.option == scrollDirection
         }
+        scrollDirection = scrollDirection // apply the saved direction when launching
         
         for option in menuItems.hapticsModeOptions {
             option.target = self
@@ -319,23 +332,41 @@ class StatusBarController
             self?.updateConnectionStatus()
         }
         
-        dial.onButtonStateChanged = { [unowned self] state in
-            switch state {
-            case .pressed:
-                currentController.onDown()
-                break
-            case .released:
-                currentController.onUp()
-                break
+        buttonHandler.onLongPress = { [weak self] in
+            guard let self = self else { return }
+            self.applyMode(self.currentMode.next)
+            self.dial.device.impact()
+        }
+
+        dial.onButtonStateChanged = { [weak self] state in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch state {
+                case .pressed:
+                    self.buttonHandler.pressed(controller: self.currentController)
+                case .released:
+                    self.buttonHandler.released()
+                }
             }
         }
         
-        dial.onRotation = { [unowned self] rotation, scrollDirection in
-            currentController.onRotate(rotation, scrollDirection)
+        dial.onRotation = { [weak self] rotation, scrollDirection in
+            DispatchQueue.main.async {
+                guard let self = self, !self.buttonHandler.longPressActive else { return }
+                self.currentController.onRotate(rotation, scrollDirection)
+            }
+        }
+
+        dial.onDisconnected = { [weak self] in
+            DispatchQueue.main.async { self?.cancelPendingInput() }
         }
     }
     
     private func updateConnectionStatus() {
+        if !AXIsProcessTrusted() {
+            menuItems.connectionStatus.title = "Accessibility permission required"
+            return
+        }
         if dial.device.isConnected {
             let serialNumber = dial.device.serialNumber
             menuItems.connectionStatus.title = "Surface Dial '\(serialNumber)' connected"
@@ -354,8 +385,14 @@ class StatusBarController
             else if (menuItems.playbackMode.state == .on) {
                 button.image = #imageLiteral(resourceName: "icon-playback")
             }
+            else {
+                button.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Zoom mode")
+            }
             
+            button.image?.isTemplate = true
             button.image?.size = NSSize(width: 18, height: 18)
+            let modeTitle = menuItems.modeItems.first { $0.selected }?.title ?? "Mac Dial"
+            button.toolTip = "Mac Dial — \(modeTitle). Hold the Dial to switch modes."
             
             button.imagePosition = .imageLeft
         }
@@ -366,14 +403,19 @@ class StatusBarController
     }
     
     @objc func setMode(sender: AnyObject) {
-        
         let item = sender as! ControllerOptionItem
-        
-        menuItems.playbackMode.state = item == menuItems.playbackMode ? .on : .off
-        menuItems.scrollMode.state = item == menuItems.scrollMode ? .on : .off
-        
-        currentMode = item.option
-        
+        cancelPendingInput()
+        applyMode(item.option)
+    }
+
+    func cancelPendingInput() {
+        buttonHandler.cancel()
+        currentController.onCancel()
+    }
+
+    private func applyMode(_ mode: Mode) {
+        currentMode = mode
+        for item in menuItems.modeItems { item.selected = item.option == mode }
         updateIcon()
     }
     

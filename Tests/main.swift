@@ -31,6 +31,7 @@ final class Clock {
 final class Harness {
     let clock = Clock()
     var mode: Mode = .scrolling
+    var profile: AppProfile?
     var savedMode = "scroll"
     var clicks = 0
     var rotations: [Int] = []
@@ -40,7 +41,8 @@ final class Harness {
     var dismissals = 0
     lazy var button = DialButtonHandler(now: { [unowned self] in self.clock.time },
                                        schedule: { [unowned self] in self.clock.schedule($0, $1) })
-    lazy var input = DialInputCoordinator(currentMode: { [unowned self] in self.mode }, button: button,
+    lazy var input = DialInputCoordinator(currentMode: { [unowned self] in self.mode },
+                                         currentProfile: { [unowned self] in self.profile }, button: button,
                                          schedule: { [unowned self] in self.clock.schedule($0, $1) })
     init() {
         input.onShortPress = { [unowned self] in self.clicks += 1 }
@@ -277,7 +279,7 @@ check(Mode(savedValue: nil) == .scrolling && Mode(savedValue: "unknown") == .scr
 check(Mode.scrolling.savedValue == "scroll", "Preserve the legacy Scroll preference key")
 
 // Hit testing and placement use the same geometry as drawing.
-for mode in Mode.allCases {
+for mode in Mode.generalModes {
     let point = RadialMenuGeometry.point(angle: RadialMenuGeometry.angle(for: mode), radius: 110)
     check(RadialMenuGeometry.mode(at: point) == mode, "Each icon lies in its own segment")
 }
@@ -354,6 +356,7 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     case .scrolling: check(mouse.map(\.type) == [.leftMouseDown, .leftMouseUp], "Scroll emits one balanced click at short release")
     case .playback: check(media == [NX_KEYTYPE_PLAY], "Playback still plays/pauses on a short click")
     case .zoom: check(keys.count == 2, "Zoom still resets on a short click")
+    default: preconditionFailure("General controllers only")
     }
 }
 playback.onCancel()
@@ -361,4 +364,180 @@ media.removeAll()
 playback.onUp()
 playback.onUp()
 check(media == [NX_KEYTYPE_PLAY, NX_KEYTYPE_PLAY, NX_KEYTYPE_NEXT], "Playback double-click still advances the track")
-print("Passed \(checks) checks: gestures, picker routing, cancellation, persistence, geometry, symbols, and recorded controller events.")
+// Lightroom is a flat sequence; the parent group is not an extra stop.
+let lightroomModes = AppProfile.lightroom.availableModes
+check(lightroomModes == [.scrolling, .playback, .zoom, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
+      "Six choices have the requested clockwise order")
+for start in lightroomModes {
+    var picker = ModePickerState(selectedMode: start, profile: .lightroom)
+    for next in 1...6 {
+        picker.move(by: 1)
+        check(picker.selectedMode == lightroomModes[(lightroomModes.firstIndex(of: start)! + next) % 6],
+              "Forward navigation crosses groups and wraps without a parent stop")
+    }
+    picker.move(by: -6)
+    check(picker.selectedMode == start, "Reverse navigation wraps all six choices")
+}
+for sensitivity in [18, 36, 72, 360] {
+    var picker = ModePickerState(selectedMode: .zoom, profile: .lightroom)
+    picker.rotate(.Clockwise(sensitivity / 3), sensitivity: sensitivity)
+    check(picker.selectedMode == .scrolling, "Lightroom uses the same twelve selection steps per revolution")
+}
+var unavailable = ModePickerState(selectedMode: .lightroomCrop)
+check(unavailable.selectedMode == .scrolling && !unavailable.select(.lightroomBrush),
+      "Unavailable app modes cannot be selected outside their profile")
+
+// Preferences are isolated from the user's actual defaults.
+let suite = "MacDial.Tests." + UUID().uuidString
+let defaults = UserDefaults(suiteName: suite)!
+defaults.set("zoom", forKey: "mode")
+let context = AppModeContext(defaults: defaults)
+context.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(context.currentMode == .zoom, "First Lightroom visit inherits the general mode")
+check(defaults.string(forKey: "appMode." + AppProfile.lightroom.bundleIdentifier) == nil,
+      "Merely visiting Lightroom does not create an explicit preference")
+context.select(.lightroomFineTune)
+check(context.currentMode == .lightroomFineTune && defaults.string(forKey: "mode") == "zoom",
+      "Selecting a Lightroom child preserves the general preference")
+context.activate(bundleIdentifier: "com.apple.finder")
+check(context.currentMode == .zoom && context.profile == nil, "Leaving Lightroom restores general Zoom")
+check(!context.select(.lightroomBrush), "A stale contextual menu action cannot select an unavailable mode")
+context.select(.playback)
+context.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(context.currentMode == .lightroomFineTune, "Returning restores the last Lightroom child")
+context.select(.scrolling)
+context.activate(bundleIdentifier: nil)
+check(context.currentMode == .playback, "A general selection inside Lightroom is also kept separate")
+let relaunched = AppModeContext(defaults: defaults)
+relaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(relaunched.currentMode == .scrolling, "A general choice in Lightroom survives relaunch")
+defaults.set("unknown-future-mode", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
+check(relaunched.currentMode == .playback, "An unknown app preference falls back to the saved general mode")
+relaunched.select(.lightroomBrush)
+let reopened = AppModeContext(defaults: defaults)
+reopened.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(reopened.currentMode == .lightroomBrush, "A Lightroom child survives relaunch")
+relaunched.activate(bundleIdentifier: "com.adobe.Lightroom")
+check(relaunched.profile == nil && relaunched.currentMode == .playback, "Cloud Lightroom does not match the Classic profile")
+defaults.removePersistentDomain(forName: suite)
+
+let gate = InputContextGate()
+let oldToken = gate.token
+gate.invalidate(at: 10)
+check(!gate.accepts(oldToken, timestamp: 11), "Queued reports are rejected after a context change")
+check(!gate.accepts(gate.token, timestamp: 9), "An old timestamp is rejected even if stamped after invalidation")
+check(gate.accepts(gate.token, timestamp: 10), "New context reports are accepted")
+for staleState: Dial.ButtonState in [.pressed, .released] {
+    let h = Harness()
+    h.profile = .lightroom
+    h.mode = .lightroomCrop
+    h.report(.pressed)
+    h.input.cancel() // foreground switch cancels before applying the new context
+    h.profile = nil
+    h.mode = .zoom
+    h.input.discard(button: staleState)
+    h.clock.advance(1)
+    h.report(.released, .Clockwise(5))
+    check(h.clicks == 0 && h.input.picker == nil, "A stale press cannot become a click or long hold in the new app")
+    if staleState == .pressed { check(h.rotations.isEmpty, "Release of a stale held press consumes its rotation") }
+    h.click()
+    check(h.clicks == 1, "A fresh press works after the context transition")
+}
+do {
+    let h = Harness()
+    h.profile = .lightroom
+    h.mode = .lightroomBrush
+    h.open()
+    h.input.highlight(.lightroomFineTune)
+    h.input.cancel()
+    h.profile = nil
+    h.mode = .playback
+    h.input.confirmSelection()
+    h.clock.advance(11)
+    check(h.commits.isEmpty && h.mode == .playback, "App switching cancels pending selection and stale timers")
+}
+
+let groupedLayout = RadialMenuLayout(profile: .lightroom)
+check(groupedLayout.diameter == 432, "Contextual bounds are 432 points")
+for segment in groupedLayout.segments {
+    let point = groupedLayout.point(angle: segment.angle, radius: segment.iconRadius)
+    check(groupedLayout.mode(at: point) == segment.mode, "Shared geometry identifies every child and excludes the parent")
+    check(groupedLayout.outline.contains(point), "Each icon lies inside the material mask")
+    check(groupedLayout.outline.compatibleCGPath.contains(point), "Native layer mask matches drawing geometry")
+    if let mode = segment.mode {
+        for angle in [segment.angle - segment.sweep / 2 + 0.1, segment.angle + segment.sweep / 2 - 0.1] {
+            check(groupedLayout.mode(at: groupedLayout.point(angle: angle, radius: segment.iconRadius)) == mode,
+                  "Pointer selection reaches both edges of each wedge")
+        }
+    }
+}
+check(groupedLayout.mode(at: groupedLayout.center) == nil, "Contextual center is not a selection target")
+check(!groupedLayout.outline.contains(groupedLayout.point(angle: 0, radius: 180)),
+      "Unused outer-ring space stays transparent")
+for screen in [NSRect(x: 0, y: 25, width: 1440, height: 875), NSRect(x: -1920, y: -200, width: 1920, height: 1080)] {
+    for point in [screen.origin, NSPoint(x: screen.maxX, y: screen.maxY)] {
+        check(screen.insetBy(dx: 10, dy: 10).contains(groupedLayout.frame(around: point, in: screen)),
+              "Larger grouped wheel stays inside each display")
+    }
+}
+
+for (mode, clockwise, counterclockwise, click) in [
+    (Mode.lightroomCrop, kVK_RightArrow, kVK_LeftArrow, kVK_ANSI_R),
+    (.lightroomFineTune, kVK_ANSI_Equal, kVK_ANSI_Minus, kVK_ANSI_Backslash),
+    (.lightroomBrush, kVK_ANSI_RightBracket, kVK_ANSI_LeftBracket, kVK_ANSI_A)
+] {
+    var events: [CGEvent] = []
+    var pids: [pid_t] = []
+    var foreground: pid_t? = 42
+    let controller = LightroomController(mode: mode, targetProcess: { foreground }, post: { event, pid in
+        events.append(event)
+        pids.append(pid)
+    })
+    controller.onDown()
+    controller.onCancel()
+    check(events.isEmpty, "Opening a menu or cancelling never sends a Lightroom key")
+    controller.onRotate(.Clockwise(2), -1)
+    controller.onRotate(.CounterClockwise(1), 1)
+    controller.onUp()
+    check(events.map { Int($0.getIntegerValueField(.keyboardEventKeycode)) } ==
+          [clockwise, clockwise, clockwise, clockwise, counterclockwise, counterclockwise, click, click],
+          "Lightroom mappings emit one key pair per step and the specified click")
+    check(events.enumerated().allSatisfy { $0.element.type == ($0.offset % 2 == 0 ? .keyDown : .keyUp) },
+          "Lightroom always balances key down and up")
+    check(events.prefix(6).allSatisfy { $0.flags == (mode == .lightroomCrop ? .maskCommand : []) }
+          && events.suffix(2).allSatisfy { $0.flags.isEmpty }, "Only photo navigation uses Command; no coarse Shift modifier")
+    check(pids.allSatisfy { $0 == 42 }, "Events target the verified Lightroom process")
+    controller.onRotate(.Clockwise(0), 1)
+    controller.onRotate(.CounterClockwise(-1), 1)
+    foreground = nil
+    controller.onUp()
+    controller.onRotate(.Clockwise(8), 1)
+    check(events.count == 8, "Inactive Lightroom and invalid counts emit no events")
+    foreground = 42
+    events.removeAll()
+    let h = Harness()
+    h.profile = .lightroom
+    h.mode = mode
+    h.input.onShortPress = { controller.onDown(); controller.onUp() }
+    h.input.onRotation = { controller.onRotate($0, $1) }
+    h.input.onCancelAction = { controller.onCancel() }
+    h.open()
+    h.input.highlight(mode)
+    h.report(.pressed)
+    h.clock.advance(0.1)
+    h.report(.released, .Clockwise(8))
+    check(events.isEmpty && h.commits == [mode], "Confirming a Lightroom mode does not execute its click or rotation")
+    h.click()
+    check(events.count == 2, "First new click after confirmation executes the Lightroom shortcut")
+}
+do {
+    var active = true
+    var events: [CGEvent] = []
+    let controller = LightroomController(mode: .lightroomCrop, targetProcess: { active ? 42 : nil }, post: { event, _ in
+        events.append(event)
+        active = false
+    })
+    controller.onRotate(.Clockwise(5), 1)
+    check(events.map(\.type) == [.keyDown, .keyUp], "Focus change during a batch completes its pair and stops subsequent shortcuts")
+}
+print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

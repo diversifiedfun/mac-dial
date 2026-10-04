@@ -72,6 +72,9 @@ extension NSMenu {
         self.addItem(items.connectionStatus)
         self.addItem(items.separator)
         for item in items.modeItems { self.addItem(item) }
+        items.lightroom.submenu = NSMenu()
+        for item in items.lightroomModes { items.lightroom.submenu?.addItem(item) }
+        self.addItem(items.lightroom)
         self.addItem(items.separator2)
         
         items.wheelSensitivity.submenu = NSMenu.init()
@@ -104,7 +107,13 @@ class StatusBarController
     private let menu: NSMenu
     private let dial: Dial
     private let menuItems = MenuItems()
-    private lazy var input = DialInputCoordinator(currentMode: { [weak self] in self?.currentMode ?? .scrolling })
+    private let modeContext = AppModeContext()
+    private let inputGate = InputContextGate()
+    private var foregroundPID: pid_t?
+    private var foregroundBundleID: String?
+    private lazy var input = DialInputCoordinator(
+        currentMode: { [weak self] in self?.currentMode ?? .scrolling },
+        currentProfile: { [weak self] in self?.modeContext.profile })
     private let radialMenu = RadialMenuController()
     private var connectionTimer: Timer?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
@@ -116,15 +125,12 @@ class StatusBarController
         let scrollMode = ControllerOptionItem.init(title: "Scroll mode", mode: .scrolling, controller: ScrollController())
         let playbackMode = ControllerOptionItem.init(title: "Playback mode", mode: .playback, controller: PlaybackController())
         let zoomMode = ControllerOptionItem(title: "Zoom mode", mode: .zoom, controller: ZoomController())
-        var modeItems: [ControllerOptionItem] {
-            Mode.allCases.map { mode in
-                switch mode {
-                case .scrolling: return scrollMode
-                case .playback: return playbackMode
-                case .zoom: return zoomMode
-                }
-            }
+        var modeItems: [ControllerOptionItem] { [scrollMode, playbackMode, zoomMode] }
+        let lightroom = NSMenuItem(title: "Lightroom")
+        let lightroomModes = AppProfile.lightroom.modes.map {
+            ControllerOptionItem(title: $0.title, mode: $0, controller: LightroomController(mode: $0))
         }
+        var allModeItems: [ControllerOptionItem] { modeItems + lightroomModes }
         let separator2 = NSMenuItem.separator()
         let wheelSensitivity = NSMenuItem.init(title: "Wheel Sensitivity")
         let wheelSensitivityOptions = [
@@ -147,26 +153,12 @@ class StatusBarController
         let quit = NSMenuItem.init(title: "Quit")
     }
     
-    var currentMode: Mode {
-        get { Mode(savedValue: UserDefaults.standard.string(forKey: "mode")) }
-        set { UserDefaults.standard.setValue(newValue.savedValue, forKey: "mode") }
+    var currentMode: Mode { modeContext.currentMode }
+
+    var currentController: Controller {
+        menuItems.allModeItems.first { $0.option == currentMode }!.controller
     }
 
-    var currentController: Controller
-    {
-        get {
-            switch (currentMode)
-            {
-            case .playback:
-                return menuItems.playbackMode.controller
-            case .scrolling:
-                return menuItems.scrollMode.controller
-            case .zoom:
-                return menuItems.zoomMode.controller
-            }
-        }
-    }
-    
     var wheelSensitivity: WheelSensitivity? {
         get {
             let raw = UserDefaults.standard.string(forKey: "sensitivity") ?? WheelSensitivity.medium.rawValue
@@ -251,6 +243,10 @@ class StatusBarController
         statusBar = NSStatusBar.system
         statusItem = statusBar.statusItem(withLength: NSStatusItem.variableLength)
         
+        let app = NSWorkspace.shared.frontmostApplication
+        foregroundPID = app?.processIdentifier
+        foregroundBundleID = app?.bundleIdentifier
+        modeContext.activate(bundleIdentifier: foregroundBundleID)
         menu.minimumWidth = 260
         
         let attributes: [NSAttributedString.Key: Any] = [
@@ -264,7 +260,7 @@ class StatusBarController
         menuItems.connectionStatus.target = self
         menuItems.connectionStatus.isEnabled = false
         
-        for item in menuItems.modeItems {
+        for item in menuItems.allModeItems {
             item.target = self
             item.action = #selector(setMode(sender:))
             item.selected = item.option == currentMode
@@ -298,6 +294,7 @@ class StatusBarController
         menu.addMenuItems(menuItems)
         
         statusItem.menu = menu
+        refreshModeUI()
         
         if let button = statusItem.button {
             button.target = self
@@ -309,12 +306,14 @@ class StatusBarController
         }
         
         input.onShortPress = { [weak self] in
-            guard let controller = self?.currentController else { return }
+            guard let self = self, !self.refreshForegroundApplication() else { return }
+            let controller = self.currentController
             controller.onDown()
             controller.onUp()
         }
         input.onRotation = { [weak self] rotation, direction in
-            self?.currentController.onRotate(rotation, direction)
+            guard let self = self, !self.refreshForegroundApplication() else { return }
+            self.currentController.onRotate(rotation, direction)
         }
         input.onCancelAction = { [weak self] in self?.currentController.onCancel() }
         input.onCommit = { [weak self] mode in self?.applyMode(mode) }
@@ -324,7 +323,10 @@ class StatusBarController
         }
         input.onPickerChanged = { [weak self] state in
             guard let self = self else { return }
-            if let state = state { self.radialMenu.show(state) }
+            if let state = state {
+                guard !self.refreshForegroundApplication() else { return }
+                self.radialMenu.show(state)
+            }
             else { self.radialMenu.dismiss() }
         }
         radialMenu.view.onHighlight = { [weak self] mode in self?.input.highlight(mode) }
@@ -336,9 +338,16 @@ class StatusBarController
         }
         radialMenu.view.onCancel = { [weak self] in self?.cancelPendingInput() }
 
+        let gate = inputGate
         dial.onInput = { [weak self] report, timestamp in
+            let token = gate.token
             DispatchQueue.main.async {
                 guard let self = self, case let .dial(button, rotation) = report else { return }
+                let changedApp = self.refreshForegroundApplication()
+                guard !changedApp, gate.accepts(token, timestamp: timestamp) else {
+                    self.input.discard(button: button)
+                    return
+                }
                 self.input.handle(button: button, rotation: rotation,
                                   sensitivity: self.dial.wheelSensitivity,
                                   scrollDirection: self.dial.scrollDirection, timestamp: timestamp)
@@ -363,7 +372,9 @@ class StatusBarController
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name) {
         let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-            self?.cancelPendingInput()
+            guard let self = self else { return }
+            self.cancelPendingInput()
+            self.refreshForegroundApplication()
         }
         observers.append((center, observer))
     }
@@ -382,28 +393,42 @@ class StatusBarController
         }
     }
     
-    private func updateIcon() {
-        
-        if let button = statusItem.button {
-            if (menuItems.scrollMode.state == .on) {
-                button.image = #imageLiteral(resourceName: "icon-scroll")
-            }
-            else if (menuItems.playbackMode.state == .on) {
-                button.image = #imageLiteral(resourceName: "icon-playback")
-            }
-            else {
-                button.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Zoom mode")
-            }
-            
-            button.image?.isTemplate = true
-            button.image?.size = NSSize(width: 18, height: 18)
-            let modeTitle = menuItems.modeItems.first { $0.selected }?.title ?? "Mac Dial"
-            button.toolTip = "Mac Dial — \(modeTitle). Hold, release, turn, then click to choose a mode."
-            
-            button.imagePosition = .imageLeft
-        }
+    private func refreshModeUI() {
+        for item in menuItems.allModeItems { item.selected = item.option == currentMode }
+        menuItems.lightroom.isHidden = modeContext.profile == nil
+        menuItems.lightroom.state = currentMode.isLightroom ? .on : .off
+        updateIcon()
     }
-    
+
+    // Also called before consuming input: do not rely on workspace notification
+    // delivery winning a race with a queued HID report or menu confirmation.
+    @discardableResult
+    private func refreshForegroundApplication() -> Bool {
+        let app = NSWorkspace.shared.frontmostApplication
+        guard foregroundPID != app?.processIdentifier || foregroundBundleID != app?.bundleIdentifier else { return false }
+        cancelPendingInput()
+        foregroundPID = app?.processIdentifier
+        foregroundBundleID = app?.bundleIdentifier
+        modeContext.activate(bundleIdentifier: foregroundBundleID)
+        refreshModeUI()
+        return true
+    }
+
+    private func updateIcon() {
+        guard let button = statusItem.button else { return }
+        let mode = currentMode
+        switch mode {
+        case .scrolling: button.image = #imageLiteral(resourceName: "icon-scroll")
+        case .playback: button.image = #imageLiteral(resourceName: "icon-playback")
+        default: button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: mode.title)
+        }
+        button.image?.isTemplate = true
+        button.image?.size = NSSize(width: 18, height: 18)
+        let context = modeContext.profile.map { "\($0.title) — " } ?? ""
+        button.toolTip = "Mac Dial — \(context)\(mode.title). Hold, release, turn, then click to choose a mode."
+        button.imagePosition = .imageLeft
+    }
+
     @objc func showAbout(sender: AnyObject) {
         
     }
@@ -415,13 +440,13 @@ class StatusBarController
     }
 
     func cancelPendingInput() {
+        inputGate.invalidate()
         input.cancel()
     }
 
     private func applyMode(_ mode: Mode) {
-        currentMode = mode
-        for item in menuItems.modeItems { item.selected = item.option == mode }
-        updateIcon()
+        guard !refreshForegroundApplication(), modeContext.select(mode) else { return }
+        refreshModeUI()
     }
     
     @objc func setSensitivity(sender: AnyObject) {

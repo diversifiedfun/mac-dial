@@ -44,7 +44,7 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
         }
         previousKeyWindow = NSApp.keyWindow
         isShowing = true
-        panel.setFrame(RadialMenuGeometry.frame(around: pointer, in: screen.visibleFrame), display: true)
+        panel.setFrame(view.menuLayout.frame(around: pointer, in: screen.visibleFrame), display: true)
         let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.alphaValue = animate ? 0 : 1
         // This gives the panel keyboard focus without activating Mac Dial or

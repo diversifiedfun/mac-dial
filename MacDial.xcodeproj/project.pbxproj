@@ -26,6 +26,9 @@
 		F00500000000000000000002 /* DialInputCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00500000000000000000001 /* DialInputCoordinator.swift */; };
 		F00600000000000000000002 /* RadialMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00600000000000000000001 /* RadialMenuView.swift */; };
 		F00700000000000000000002 /* RadialMenuController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00700000000000000000001 /* RadialMenuController.swift */; };
+		F00800000000000000000002 /* AppModeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00800000000000000000001 /* AppModeContext.swift */; };
+		F00900000000000000000002 /* LightroomController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00900000000000000000001 /* LightroomController.swift */; };
+		F01000000000000000000002 /* RadialMenuLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01000000000000000000001 /* RadialMenuLayout.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +55,9 @@
 		F00500000000000000000001 /* DialInputCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialInputCoordinator.swift; sourceTree = "<group>"; };
 		F00600000000000000000001 /* RadialMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuView.swift; sourceTree = "<group>"; };
 		F00700000000000000000001 /* RadialMenuController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuController.swift; sourceTree = "<group>"; };
+		F00800000000000000000001 /* AppModeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModeContext.swift; sourceTree = "<group>"; };
+		F00900000000000000000001 /* LightroomController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightroomController.swift; sourceTree = "<group>"; };
+		F01000000000000000000001 /* RadialMenuLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadialMenuLayout.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +100,9 @@
 				F00100000000000000000001 /* DialButtonHandler.swift */,
 				F00200000000000000000001 /* ZoomController.swift */,
 				F00700000000000000000001 /* RadialMenuController.swift */,
+				F01000000000000000000001 /* RadialMenuLayout.swift */,
+				F00900000000000000000001 /* LightroomController.swift */,
+				F00800000000000000000001 /* AppModeContext.swift */,
 				F00600000000000000000001 /* RadialMenuView.swift */,
 				F00500000000000000000001 /* DialInputCoordinator.swift */,
 				F00400000000000000000001 /* ModePickerState.swift */,
@@ -204,6 +213,9 @@
 				F00100000000000000000002 /* DialButtonHandler.swift in Sources */,
 				F00200000000000000000002 /* ZoomController.swift in Sources */,
 				F00700000000000000000002 /* RadialMenuController.swift in Sources */,
+				F01000000000000000000002 /* RadialMenuLayout.swift in Sources */,
+				F00900000000000000000002 /* LightroomController.swift in Sources */,
+				F00800000000000000000002 /* AppModeContext.swift in Sources */,
 				F00600000000000000000002 /* RadialMenuView.swift in Sources */,
 				F00500000000000000000002 /* DialInputCoordinator.swift in Sources */,
 				F00400000000000000000002 /* ModePickerState.swift in Sources */,

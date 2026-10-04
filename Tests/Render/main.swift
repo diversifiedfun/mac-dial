@@ -10,7 +10,12 @@ let application = NSApplication.shared
 application.setActivationPolicy(.prohibited)
 let destination = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
+// Keep native symbol rasterization at the same 2x density as the exported
+// bitmap, including while the desktop is locked or has no Retina screen.
+final class RenderWindow: NSWindow {
+    override var backingScaleFactor: CGFloat { 2 }
+}
+let window = RenderWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
                       styleMask: .borderless, backing: .buffered, defer: false)
 window.isOpaque = false
 window.backgroundColor = .clear
@@ -25,7 +30,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
 func render(_ name: String) throws {
     view.layoutSubtreeIfNeeded()
     view.displayIfNeeded()
-    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 600,
+    let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2),
                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                   isPlanar: false, colorSpaceName: .deviceRGB,
                                   bytesPerRow: 0, bitsPerPixel: 0)!
@@ -34,28 +39,55 @@ func render(_ name: String) throws {
     try bitmap.representation(using: .png, properties: [:])!.write(to: destination.appendingPathComponent(name + ".png"))
 }
 
-for mode in Mode.allCases {
-    var state = ModePickerState(selectedMode: mode)
-    state.isArmed = true
-    view.update(state)
-    try render(mode.rawValue)
-    let buttons = view.subviews.compactMap { $0 as? NSButton }
-    check(buttons.count == 3, "Three native accessible controls")
-    for button in buttons {
-        let candidate = Mode.allCases[button.tag]
-        check(button.accessibilityRole() == .radioButton, "Mode controls expose radio-button semantics")
-        check(button.accessibilityLabel() == "\(candidate.title) mode", "Mode label is accessible")
-        check((button.accessibilityValue() as? Int) == (candidate == mode ? 1 : 0), "Selected value is accessible")
-        check(button.image != nil && button.isEnabled, "Icons are present and actionable after release")
+func buttons(in parent: NSView) -> [NSButton] {
+    parent.subviews.flatMap { child -> [NSButton] in
+        if let button = child as? NSButton { return [button] }
+        return buttons(in: child)
     }
 }
 
-view.update(ModePickerState(selectedMode: .scrolling))
-check(view.subviews.compactMap { $0 as? NSButton }.allSatisfy { !$0.isEnabled }, "Opening hold disables selection")
+func update(_ state: ModePickerState) {
+    let diameter = RadialMenuLayout(profile: state.profile).diameter
+    window.setContentSize(NSSize(width: diameter, height: diameter))
+    view.update(state)
+}
+
+for profile: AppProfile? in [nil, .lightroom] {
+    let modes = profile?.availableModes ?? Mode.generalModes
+    for mode in modes {
+        var state = ModePickerState(selectedMode: mode, profile: profile)
+        state.isArmed = true
+        update(state)
+        try render((profile == nil ? "" : "lightroom-") + mode.rawValue)
+        let controls = buttons(in: view)
+        check(controls.count == modes.count, "Only selectable modes expose native controls")
+        for button in controls {
+            let candidate = Mode.allCases[button.tag]
+            check(button.accessibilityRole() == .radioButton, "Mode controls expose radio-button semantics")
+            check(button.accessibilityLabel() == "\(candidate.title) mode", "Mode label is accessible")
+            check((button.accessibilityValue() as? Int) == (candidate == mode ? 1 : 0), "Selected value is accessible")
+            check(button.image != nil && button.isEnabled, "Icons are present and actionable after release")
+            check(button.frame.width >= 44 && button.frame.height >= 44, "Icons have adequate pointer targets")
+            let position = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
+            check(view.menuLayout.mode(at: position) == candidate, "Actual button frames match the shared geometry")
+            check((view.hitTest(position) as? NSButton)?.tag == button.tag, "Native hit testing reaches each icon through its group")
+        }
+        let visibleLabels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
+        check(visibleLabels.allSatisfy { $0.attributedStringValue.size().width <= $0.bounds.width },
+              "All center text fits without truncation")
+        if profile != nil {
+            let group = view.subviews.first { $0.accessibilityRole() == .group && $0.accessibilityLabel() == "Lightroom modes" }
+            check(group != nil && buttons(in: group!).count == 3, "Lightroom children have an accessible group")
+        }
+    }
+}
+
+update(ModePickerState(selectedMode: .scrolling))
+check(buttons(in: view).allSatisfy { !$0.isEnabled }, "Opening hold disables selection")
 try render("opening")
 var state = ModePickerState(selectedMode: .scrolling)
 state.isArmed = true
-view.update(state)
+update(state)
 view.updateDisplayOptions(reduceTransparency: true, increasedContrast: true)
 try render("reduced-transparency-contrast")
 check(view.subviews.compactMap { $0 as? NSVisualEffectView }.allSatisfy(\.isHidden), "Opaque fallback hides the material")
@@ -77,7 +109,7 @@ check(confirmations == 2 && cancellations == 1, "Return and Escape route correct
 
 var selected: [Mode] = []
 view.onSelect = { selected.append($0) }
-for mode in Mode.allCases {
+for mode in Mode.generalModes {
     let location = RadialMenuGeometry.point(angle: RadialMenuGeometry.angle(for: mode) + 20, radius: 125)
     func mouse(_ type: NSEvent.EventType) -> NSEvent {
         NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
@@ -87,5 +119,48 @@ for mode in Mode.allCases {
     view.mouseDown(with: mouse(.leftMouseDown))
     view.mouseUp(with: mouse(.leftMouseUp))
 }
-check(selected == Mode.allCases, "Each wedge supports pointer selection")
-print("Passed \(checks) native view checks; rendered five states to \(destination.path)")
+check(selected == Mode.generalModes, "Each wedge supports pointer selection")
+// Exercise actual contextual pointer targets, including the nonselectable parent.
+state = ModePickerState(selectedMode: .lightroomCrop, profile: .lightroom)
+state.isArmed = true
+update(state)
+view.updateDisplayOptions(reduceTransparency: false, increasedContrast: false)
+selected.removeAll()
+var highlights: [Mode] = []
+view.onHighlight = { highlights.append($0) }
+func mouse(_ type: NSEvent.EventType, at location: NSPoint) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                      windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                      clickCount: 1, pressure: 1)!
+}
+for segment in view.menuLayout.segments {
+    let location = view.menuLayout.point(angle: segment.angle, radius: segment.iconRadius)
+    view.mouseMoved(with: mouse(.mouseMoved, at: location))
+    view.mouseDown(with: mouse(.leftMouseDown, at: location))
+    view.mouseUp(with: mouse(.leftMouseUp, at: location))
+}
+check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips the app parent and selects all six leaves")
+check(highlights.count == 12, "The parent cannot be highlighted")
+let parentPoint = view.menuLayout.point(angle: 180, radius: 111)
+check(!(view.hitTest(parentPoint) is NSButton), "The app icon is not an actionable control")
+let selectedBefore = selected.count
+state.isArmed = false
+update(state)
+check(buttons(in: view).allSatisfy { !$0.isEnabled }, "Opening hold disables both rings")
+let childPoint = view.menuLayout.point(angle: 180, radius: 183)
+view.mouseDown(with: mouse(.leftMouseDown, at: childPoint))
+view.mouseUp(with: mouse(.leftMouseUp, at: childPoint))
+check(selected.count == selectedBefore, "Opening hold cannot activate an outer child")
+try render("lightroom-opening")
+state.isArmed = true
+update(state)
+view.updateDisplayOptions(reduceTransparency: true, increasedContrast: true)
+try render("lightroom-reduced-transparency-contrast")
+check(view.subviews.compactMap { $0 as? NSVisualEffectView }.allSatisfy(\.isHidden), "Contextual opaque fallback hides material")
+var didCancel = false
+view.onCancel = { didCancel = true }
+view.mouseDown(with: mouse(.leftMouseDown, at: view.menuLayout.point(angle: 0, radius: 180)))
+check(didCancel, "Empty space outside the partial outer ring cancels")
+update(ModePickerState(selectedMode: .zoom))
+check(view.bounds.width == 300 && buttons(in: view).count == 3, "Leaving app context restores the original size and choices")
+print("Passed \(checks) native view checks; rendered general and Lightroom states to \(destination.path)")

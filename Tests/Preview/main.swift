@@ -9,9 +9,11 @@ enum Dial {
 
 final class PreviewDelegate: NSObject, NSApplicationDelegate {
     let menu = RadialMenuController()
-    var mode = Mode.scrolling
+    var mode = Mode.lightroomCrop
+    var profile: AppProfile? = .lightroom
     var status: NSStatusItem!
     lazy var input = DialInputCoordinator(currentMode: { [unowned self] in self.mode },
+                                         currentProfile: { [unowned self] in self.profile },
                                          schedule: { _, _ in }) // Keep previews open for visual inspection.
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -36,13 +38,15 @@ final class PreviewDelegate: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.title = "Dial Preview"
         let actions = NSMenu()
-        for mode in Mode.allCases {
-            let item = NSMenuItem(title: "Preview \(mode.title)", action: #selector(openMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = mode
-            actions.addItem(item)
+        for profile: AppProfile? in [nil, .lightroom] {
+            for mode in profile?.availableModes ?? Mode.generalModes {
+                let item = NSMenuItem(title: "\(profile?.title ?? "General"): \(mode.title)", action: #selector(openMode(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = ModePickerState(selectedMode: mode, profile: profile)
+                actions.addItem(item)
+            }
+            actions.addItem(.separator())
         }
-        actions.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Preview", action: #selector(quitPreview), keyEquivalent: "q")
         quit.target = self
         actions.addItem(quit)
@@ -59,7 +63,10 @@ final class PreviewDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openMode(_ sender: NSMenuItem) {
-        mode = sender.representedObject as! Mode
+        let state = sender.representedObject as! ModePickerState
+        input.cancel()
+        mode = state.selectedMode
+        profile = state.profile
         // Allow the native status menu to finish tracking before taking keys.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.open() }
     }

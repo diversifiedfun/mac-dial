@@ -12,7 +12,7 @@ You can find universal builds of the app under "releases". Note that these build
 
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
-The app currently supports three modes:
+The app supports three general modes, plus contextual Lightroom Classic modes:
 * Scroll mode: Turning the dial will result in scrolling. A short press clicks at the current cursor position when released. Press-and-hold dragging is not supported.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
@@ -47,6 +47,55 @@ arc. Its native controls expose mode labels and selected state to accessibility.
 Reduce Transparency uses an opaque surface; Increase Contrast strengthens
 boundaries; Reduce Motion disables the opening fade.
 
+### Lightroom Classic modes
+
+When **Lightroom Classic is the foreground app**, the wheel shows four equal
+inner wedges: Scroll (top), Playback (right), Zoom (bottom), and Lightroom (left).
+Three selectable icons extend outward from the Lightroom quarter in a 66-point
+outer arc. The inner wheel remains 300 points; contextual bounds are 432×432.
+Lightroom’s installed app icon identifies its parent wedge, which is a visual
+group rather than another selection target.
+
+Turning still follows one continuous sequence, with no extra click to enter a
+submenu: **Scroll → Playback → Zoom → Crop & Browse → Fine Tune → Brush Size**.
+The approximately 30° selection step, hold/release gesture, cancellation,
+keyboard navigation, and Haptics setting are the same in both layouts.
+The center shows the highlighted Lightroom mode’s turn and click actions.
+
+| Lightroom mode | Clockwise | Counterclockwise | Short click |
+| --- | --- | --- | --- |
+| Crop & Browse | Next image: Command+Right | Previous image: Command+Left | R — Crop |
+| Fine Tune | Increase selected adjustment: +/= | Decrease selected adjustment: − | Backslash — Before view |
+| Brush Size | Larger brush: ] | Smaller brush: [ | A — Visualize Spots |
+
+Each reported rotation step sends one balanced key pair. Wheel Sensitivity
+controls the number of steps per revolution; Scroll Direction does not reverse
+Lightroom actions. Fine Tune sends the unshifted U.S. +/= key and minus key for
+small increments, without adding Shift for coarse increments.
+
+Selecting a mode only changes the Dial mapping. Choose the relevant Lightroom
+tool or adjustment yourself: Fine Tune acts on the selected adjustment, while
+Visualize Spots requires the appropriate Remove/spot-removal tool. These modes
+do not detect the active tool, inspect text fields, or change Lightroom modules.
+
+On first use in Lightroom, the current general mode stays active until you
+explicitly select a mode. Later visits restore the last choice made in Lightroom,
+including a general mode if you selected one there. Leaving Lightroom restores
+your separately saved general mode. Both choices survive relaunches. Existing
+`mode` values (`scroll`, `playback`, `zoom`) remain compatible; the Lightroom
+choice is stored under `appMode.com.adobe.LightroomClassicCC7`.
+
+The menu bar also exposes a contextual Lightroom submenu and reflects the
+current effective mode in its icon and tooltip. Switching foreground apps
+cancels any active picker/press and discards queued input from the old context.
+Each Lightroom shortcut rechecks the foreground app, then sends both key edges
+to that Lightroom process so its release cannot spill into another application.
+
+Initial support targets **Lightroom Classic** (`com.adobe.LightroomClassicCC7`)
+and the U.S. keyboard layout. Cloud Lightroom and other app profiles are not
+included. Merely keeping Lightroom open in the background does not enable its
+modes. Outside Lightroom the original three-mode wheel returns.
+
 If you want to app to run at startup you will need to add it yourself to the "login items" for your user.
 
 ## Improvements
@@ -68,8 +117,8 @@ CMake is not required. The local deployment target is macOS 12 or later.
 The resulting app is in `../build/Build/Products/Release/MacDial.app`.
 
 The installed copy is `/Applications/MacDial.app`; building does not replace it.
-The radial-picker build is packaged at
-`../downloads/MacDial-radial-menu-arm64.app.zip`. Earlier archives are retained.
+The Lightroom build is packaged at
+`../downloads/MacDial-lightroom-modes-arm64.app.zip`. Earlier archives are retained.
 The local build is ad-hoc signed.
 
 Before a physical Dial check, quit the installed Mac Dial copy, then open
@@ -85,24 +134,34 @@ require removing and re-adding it under Privacy & Security > Accessibility
   normalization, preference compatibility, multi-display placement, and actual
   controller events recorded without posting input to the desktop.
 - `bash Tests/render.sh` checks the native view's accessibility and input handlers
-  and exports 600×600 images of all three selections, the opening state, and
-  the opaque/high-contrast fallback under `../build/radial-render/images/`.
+  and exports all general and Lightroom selections, opening states, and
+  opaque/high-contrast fallbacks under `../build/radial-render/images/`.
+  General exports are 600×600 pixels and Lightroom exports are 864×864 at 2×.
+  The renderer explicitly uses 2× backing so SF Symbols remain sharp even when
+  the desktop is locked or a Retina screen is unavailable.
 - `bash Tests/preview.sh` builds and opens **Mac Dial Preview**, a separate
   hardware-free app using the production picker and gesture router. Its menu-bar
-  item reopens any mode. It never opens the HID device, posts system input,
+  item previews either the general or Lightroom layout and every selection.
+  It opens initially on Crop & Browse. It never opens the HID device, posts system input,
   requests permissions, or changes saved modes. Only this inspection preview
   disables the idle timeout; the real app retains the 10-second timeout.
+  Add `--build-only` to compile the preview without opening it.
 
-The local build, recorded-event tests, and offscreen native-view checks pass.
-On the physical Dial, long-press opening, mode selection/menu-bar updates, and
-haptics were confirmed. System actions were blocked by a stale Accessibility
-grant; the exact new build was re-added and restarted. Scrolling, volume, and
-zoom still need a follow-up check after that permission refresh.
-The native UI inspection service timed out, so live keyboard-focus restoration,
-full-screen/Space transitions, and actual multi-display presentation remain
-manual checks. Physical rotation feel, haptics, and disconnect/sleep recovery
-also need broader validation with the Surface Dial. See `design-qa.md` for visual evidence
-and the remaining runtime checks. Installation is a separate step.
+The Lightroom build, strict code-signature verification, 247 recording-only
+behavior checks, and 352 native-view checks pass. Automated checks cover all six
+modes, app-specific persistence, stale-report rejection, app-switch cancellation,
+exact keyboard events and modifiers, group hit testing, accessible controls,
+text fit, and placement on displays with negative coordinates.
+
+The native preview was launched, but live UI inspection was blocked by a locked
+Mac. Physical Dial validation and live focus/Space behavior remain unverified for
+this build. On Lightroom Classic 15.6, check next/previous navigation with Crop
+open, fine adjustment step size, Before view, brush size and Visualize Spots,
+then leave and return to Lightroom to check mode restoration. Use disposable
+photos or virtual copies for that check. Also check the wheel over full-screen
+Lightroom, near display edges, and after disconnect/reconnect or sleep/wake.
+See `design-qa.md` for the visual evidence and remaining checks. Installation is
+a separate step; building and packaging do not replace `/Applications/MacDial.app`.
 
 In this setup, Scroll Direction > Natural gives clockwise-down scrolling.
 Launch at login is not configured.

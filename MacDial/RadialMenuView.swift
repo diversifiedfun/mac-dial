@@ -1,42 +1,19 @@
 import AppKit
 
-enum RadialMenuGeometry {
-    static let diameter: CGFloat = 300
-    static let innerRadius: CGFloat = 72
-
-    static func frame(around point: NSPoint, in screen: NSRect) -> NSRect {
-        let margin: CGFloat = 10
-        let available = screen.insetBy(dx: margin, dy: margin)
-        return NSRect(x: max(available.minX, min(point.x - diameter / 2, available.maxX - diameter)),
-                      y: max(available.minY, min(point.y - diameter / 2, available.maxY - diameter)),
-                      width: diameter, height: diameter)
-    }
-
-    static func angle(for mode: Mode) -> CGFloat {
-        90 - CGFloat(Mode.allCases.firstIndex(of: mode)!) * 120
-    }
-
-    static func point(angle: CGFloat, radius: CGFloat) -> NSPoint {
-        let radians = angle * .pi / 180
-        return NSPoint(x: diameter / 2 + cos(radians) * radius,
-                       y: diameter / 2 + sin(radians) * radius)
-    }
-
-    static func mode(at point: NSPoint) -> Mode? {
-        let dx = point.x - diameter / 2
-        let dy = point.y - diameter / 2
-        let radius = hypot(dx, dy)
-        guard radius >= innerRadius, radius <= diameter / 2 else { return nil }
-        let degrees = atan2(dy, dx) * 180 / .pi
-        let clockwise = (150 - degrees + 360).truncatingRemainder(dividingBy: 360)
-        return Mode.allCases[Int(clockwise / 120) % Mode.allCases.count]
-    }
-}
-
 private final class ModeIconButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    // Keyboard navigation belongs to the wheel rather than the icon buttons.
     override var acceptsFirstResponder: Bool { false }
+}
+
+private final class DecorationImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class ModeGroupView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
 }
 
 final class RadialMenuView: NSView {
@@ -51,10 +28,16 @@ final class RadialMenuView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Scroll")
     private let turnLabel = NSTextField(labelWithString: "Turn to choose")
     private let clickLabel = NSTextField(labelWithString: "Click to select")
+    private let contextLabel = NSTextField(labelWithString: "LIGHTROOM")
+    private let gestureLabel = NSTextField(labelWithString: "Turn • Click to select")
+    private let appGroup = ModeGroupView()
+    private let appIcon = DecorationImageView()
     private var buttons: [Mode: NSButton] = [:]
     private var tracking: NSTrackingArea?
     private var displayObserver: NSObjectProtocol?
     private var mouseDownMode: Mode?
+    private var isArmed = false
+    private(set) var menuLayout = RadialMenuLayout(profile: nil)
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -62,56 +45,37 @@ final class RadialMenuView: NSView {
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
         appearance = NSAppearance(named: .vibrantDark)
-        wantsLayer = true
-        layer?.cornerRadius = 150
-        layer?.masksToBounds = true
         setAccessibilityElement(false)
         setAccessibilityLabel("Mac Dial modes")
 
-        material.frame = bounds
+        material.wantsLayer = true
         material.material = .hudWindow
         material.blendingMode = .behindWindow
         material.state = .active
-        material.autoresizingMask = [.width, .height]
         addSubview(material)
-        surface.frame = bounds
-        surface.autoresizingMask = [.width, .height]
         addSubview(surface)
 
-        for mode in Mode.allCases {
-            let button = ModeIconButton()
-            button.isBordered = false
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 28, weight: .regular))
-            button.contentTintColor = .white
-            button.target = self
-            button.action = #selector(selectIcon(_:))
-            button.tag = Mode.allCases.firstIndex(of: mode)!
-            let center = RadialMenuGeometry.point(angle: RadialMenuGeometry.angle(for: mode), radius: 108)
-            button.frame = NSRect(x: center.x - 25, y: center.y - 25, width: 50, height: 50)
-            button.setAccessibilityRole(.radioButton)
-            button.setAccessibilityLabel("\(mode.title) mode")
-            button.setAccessibilityHelp("Select \(mode.title) for the Surface Dial")
-            addSubview(button)
-            buttons[mode] = button
-        }
+        appGroup.setAccessibilityElement(true)
+        appGroup.setAccessibilityRole(.group)
+        appGroup.setAccessibilityLabel("Lightroom modes")
+        appGroup.setAccessibilityHelp("Three modes available while Lightroom Classic is active")
+        addSubview(appGroup)
+        appIcon.imageScaling = .scaleProportionallyDown
+        appIcon.setAccessibilityElement(false)
+        appGroup.addSubview(appIcon)
 
-        titleLabel.font = .systemFont(ofSize: 21, weight: .medium)
-        titleLabel.textColor = .white
-        titleLabel.frame = NSRect(x: 70, y: 148, width: 160, height: 28)
-        turnLabel.frame = NSRect(x: 76, y: 128, width: 148, height: 18)
-        clickLabel.frame = NSRect(x: 76, y: 111, width: 148, height: 18)
-        for label in [titleLabel, turnLabel, clickLabel] {
+        for label in [titleLabel, turnLabel, clickLabel, contextLabel, gestureLabel] {
             label.alignment = .center
             label.isSelectable = false
-            if label !== titleLabel {
-                label.font = .systemFont(ofSize: 11, weight: .regular)
-                label.textColor = NSColor.white.withAlphaComponent(0.72)
-            }
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = NSColor.white.withAlphaComponent(0.72)
             addSubview(label)
         }
+        titleLabel.textColor = .white
+        contextLabel.font = .systemFont(ofSize: 9, weight: .semibold)
+        gestureLabel.font = .systemFont(ofSize: 10)
+        rebuildControls()
+        update(ModePickerState(selectedMode: .scrolling))
         displayObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil, queue: .main) { [weak self] _ in self?.updateDisplayOptions() }
@@ -124,63 +88,148 @@ final class RadialMenuView: NSView {
         if let observer = displayObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
 
+    private func rebuildControls() {
+        mouseDownMode = nil
+        buttons.values.forEach { $0.removeFromSuperview() }
+        buttons.removeAll()
+        setFrameSize(NSSize(width: menuLayout.diameter, height: menuLayout.diameter))
+        material.frame = bounds
+        surface.frame = bounds
+        surface.menuLayout = menuLayout
+        appGroup.frame = bounds
+        appGroup.isHidden = menuLayout.profile == nil
+        appGroup.setAccessibilityLabel("\(menuLayout.profile?.title ?? "App") modes")
+        if let profile = menuLayout.profile {
+            appIcon.image = applicationIcon(for: profile)
+            let p = menuLayout.point(angle: 180, radius: 111)
+            appIcon.frame = NSRect(x: p.x - 21, y: p.y - 21, width: 42, height: 42)
+        }
+        for segment in menuLayout.segments {
+            guard let mode = segment.mode else { continue }
+            let button = ModeIconButton()
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 28, weight: .regular))
+            button.contentTintColor = .white
+            button.target = self
+            button.action = #selector(selectIcon(_:))
+            button.tag = Mode.allCases.firstIndex(of: mode)!
+            let p = menuLayout.point(angle: segment.angle, radius: segment.iconRadius)
+            button.frame = NSRect(x: p.x - 25, y: p.y - 25, width: 50, height: 50)
+            button.setAccessibilityRole(.radioButton)
+            button.setAccessibilityLabel("\(mode.title) mode")
+            button.setAccessibilityHelp(mode.isLightroom
+                ? "Lightroom. \(mode.turnHint). \(mode.clickHint). Turn to choose; click to select."
+                : "Select \(mode.title) for the Surface Dial")
+            if menuLayout.profile?.modes.contains(mode) == true { appGroup.addSubview(button) }
+            else { addSubview(button) }
+            buttons[mode] = button
+        }
+        let mask = CAShapeLayer()
+        mask.path = menuLayout.outline.compatibleCGPath
+        material.layer?.mask = mask
+    }
+
+    private func applicationIcon(for profile: AppProfile) -> NSImage? {
+        var candidates = NSWorkspace.shared.runningApplications
+            .filter { $0.bundleIdentifier == profile.bundleIdentifier }.compactMap(\.bundleURL)
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: profile.bundleIdentifier) {
+            candidates.append(url)
+        }
+        // Launch Services lookup can be unavailable in offscreen inspection.
+        if profile == .lightroom {
+            candidates.append(URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        }
+        for url in candidates {
+            guard let bundle = Bundle(url: url), bundle.bundleIdentifier == profile.bundleIdentifier,
+                  let name = bundle.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
+                  let resources = bundle.resourceURL else { continue }
+            let filename = (name as NSString).pathExtension.isEmpty ? name + ".icns" : name
+            if let icon = NSImage(contentsOf: resources.appendingPathComponent(filename)) { return icon }
+        }
+        return NSImage(systemSymbolName: "app", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 32, weight: .regular))
+    }
+
     func update(_ state: ModePickerState) {
+        if menuLayout.profile != state.profile {
+            menuLayout = RadialMenuLayout(profile: state.profile)
+            rebuildControls()
+        }
         let changed = surface.selectedMode != state.selectedMode
         surface.selectedMode = state.selectedMode
+        isArmed = state.isArmed
         titleLabel.stringValue = state.selectedMode.title
-        turnLabel.stringValue = state.isArmed ? "Turn to choose" : "Release to choose"
-        clickLabel.stringValue = state.isArmed ? "Click to select" : "Hold again to cancel"
+        let c = menuLayout.center
+        let appMode = state.profile?.modes.contains(state.selectedMode) == true
+        contextLabel.isHidden = !appMode
+        gestureLabel.isHidden = !appMode
+        if appMode {
+            contextLabel.stringValue = state.profile!.title.uppercased()
+            contextLabel.frame = NSRect(x: c.x - 60, y: c.y + 34, width: 120, height: 14)
+            titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
+            titleLabel.frame = NSRect(x: c.x - 68, y: c.y + 10, width: 136, height: 24)
+            turnLabel.frame = NSRect(x: c.x - 68, y: c.y - 12, width: 136, height: 18)
+            clickLabel.frame = NSRect(x: c.x - 68, y: c.y - 29, width: 136, height: 18)
+            gestureLabel.frame = NSRect(x: c.x - 62, y: c.y - 49, width: 124, height: 16)
+            turnLabel.stringValue = state.selectedMode.turnHint
+            clickLabel.stringValue = state.selectedMode.clickHint
+            gestureLabel.stringValue = state.isArmed ? "Turn • Click to select" : "Release to choose"
+        } else {
+            titleLabel.font = .systemFont(ofSize: 21, weight: .medium)
+            titleLabel.frame = NSRect(x: c.x - 80, y: c.y - 2, width: 160, height: 28)
+            turnLabel.frame = NSRect(x: c.x - 74, y: c.y - 22, width: 148, height: 18)
+            clickLabel.frame = NSRect(x: c.x - 74, y: c.y - 39, width: 148, height: 18)
+            turnLabel.stringValue = state.isArmed ? "Turn to choose" : "Release to choose"
+            clickLabel.stringValue = state.isArmed ? "Click to select" : "Hold again to cancel"
+        }
         for (mode, button) in buttons {
             button.alphaValue = mode == state.selectedMode ? 1 : 0.78
             button.setAccessibilityValue(mode == state.selectedMode ? 1 : 0)
             button.isEnabled = state.isArmed
         }
-        if changed {
-            NSAccessibility.post(element: self, notification: .selectedChildrenChanged)
-        }
+        if changed { NSAccessibility.post(element: self, notification: .selectedChildrenChanged) }
     }
 
     func updateDisplayOptions(reduceTransparency: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
                               increasedContrast: Bool = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast) {
         material.isHidden = reduceTransparency
-        layer?.backgroundColor = reduceTransparency
-            ? NSColor(calibratedWhite: 0.12, alpha: 1).cgColor : NSColor.clear.cgColor
+        surface.reduceTransparency = reduceTransparency
         surface.increasedContrast = increasedContrast
     }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking = tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeAlways, .inVisibleRect],
-                                  owner: self, userInfo: nil)
+        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(area)
         tracking = area
     }
 
     override func mouseMoved(with event: NSEvent) {
-        if let mode = RadialMenuGeometry.mode(at: convert(event.locationInWindow, from: nil)) {
-            onHighlight?(mode)
-        }
+        guard isArmed else { return }
+        if let mode = menuLayout.mode(at: convert(event.locationInWindow, from: nil)) { onHighlight?(mode) }
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        mouseDownMode = RadialMenuGeometry.mode(at: point)
+        mouseDownMode = isArmed ? menuLayout.mode(at: point) : nil
         if let mode = mouseDownMode { onHighlight?(mode) }
-        else if hypot(point.x - 150, point.y - 150) > 150 { onCancel?() }
+        else if !menuLayout.outline.contains(point) { onCancel?() }
     }
 
     override func mouseUp(with event: NSEvent) {
         defer { mouseDownMode = nil }
-        if let mode = mouseDownMode,
-           RadialMenuGeometry.mode(at: convert(event.locationInWindow, from: nil)) == mode {
-            onSelect?(mode)
-        }
+        if isArmed, let mode = mouseDownMode,
+           menuLayout.mode(at: convert(event.locationInWindow, from: nil)) == mode { onSelect?(mode) }
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { onCancel?(); return }
+        guard isArmed else { return }
         switch event.keyCode {
-        case 53: onCancel?()
         case 123, 126: onMove?(-1)
         case 124, 125: onMove?(1)
         case 36, 76: onConfirm?()
@@ -189,57 +238,74 @@ final class RadialMenuView: NSView {
     }
 
     @objc private func selectIcon(_ sender: NSButton) {
+        guard isArmed, sender.isEnabled else { return }
         onSelect?(Mode.allCases[sender.tag])
     }
 }
 
 private final class RadialSurfaceView: NSView {
+    var menuLayout = RadialMenuLayout(profile: nil) { didSet { needsDisplay = true } }
     var selectedMode: Mode = .scrolling { didSet { needsDisplay = true } }
     var increasedContrast = false { didSet { needsDisplay = true } }
+    var reduceTransparency = false { didSet { needsDisplay = true } }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        let center = NSPoint(x: 150, y: 150)
-        NSColor.black.withAlphaComponent(0.24).setFill()
-        NSBezierPath(ovalIn: bounds).fill()
-
-        let angle = RadialMenuGeometry.angle(for: selectedMode)
-        let wedge = NSBezierPath()
-        wedge.move(to: RadialMenuGeometry.point(angle: angle + 60, radius: 150))
-        wedge.appendArc(withCenter: center, radius: 150, startAngle: angle + 60, endAngle: angle - 60, clockwise: true)
-        wedge.line(to: RadialMenuGeometry.point(angle: angle - 60, radius: RadialMenuGeometry.innerRadius))
-        wedge.appendArc(withCenter: center, radius: RadialMenuGeometry.innerRadius,
-                        startAngle: angle - 60, endAngle: angle + 60, clockwise: false)
-        wedge.close()
-        NSColor.white.withAlphaComponent(increasedContrast ? 0.24 : 0.10).setFill()
-        wedge.fill()
-
-        NSColor.white.withAlphaComponent(increasedContrast ? 0.45 : 0.10).setStroke()
-        let border = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-        border.lineWidth = 1
-        border.stroke()
-        for mode in Mode.allCases {
-            let separatorAngle = RadialMenuGeometry.angle(for: mode) + 60
-            let line = NSBezierPath()
-            line.move(to: RadialMenuGeometry.point(angle: separatorAngle, radius: RadialMenuGeometry.innerRadius))
-            line.line(to: RadialMenuGeometry.point(angle: separatorAngle, radius: 146))
-            line.lineWidth = 0.5
-            line.stroke()
+        let layout = menuLayout
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        layout.outline.addClip()
+        (reduceTransparency ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor.black.withAlphaComponent(0.24)).setFill()
+        layout.outline.fill()
+        for segment in layout.segments {
+            if segment.mode == selectedMode {
+                NSColor.white.withAlphaComponent(increasedContrast ? 0.24 : 0.10).setFill()
+                layout.path(for: segment).fill()
+            } else if segment.mode == nil && layout.profile?.modes.contains(selectedMode) == true {
+                NSColor.systemBlue.withAlphaComponent(increasedContrast ? 0.24 : 0.12).setFill()
+                layout.path(for: segment).fill()
+            }
         }
 
-        let middle = NSBezierPath(ovalIn: NSRect(x: 78, y: 78, width: 144, height: 144))
+        NSColor.white.withAlphaComponent(increasedContrast ? 0.45 : 0.10).setStroke()
+        if layout.profile == nil {
+            let border = NSBezierPath(ovalIn: layout.coreFrame.insetBy(dx: 0.5, dy: 0.5))
+            border.lineWidth = 1
+            border.stroke()
+            for segment in layout.segments {
+                let angle = segment.angle + segment.sweep / 2
+                let line = NSBezierPath()
+                line.move(to: layout.point(angle: angle, radius: 72))
+                line.line(to: layout.point(angle: angle, radius: 146))
+                line.lineWidth = 0.5
+                line.stroke()
+            }
+        } else {
+            let outline = layout.outline
+            outline.lineWidth = 1
+            outline.stroke()
+            for segment in layout.segments {
+                let path = layout.path(for: segment)
+                path.lineWidth = 0.5
+                path.stroke()
+            }
+        }
+        let middle = NSBezierPath(ovalIn: NSRect(x: layout.center.x - 72, y: layout.center.y - 72, width: 144, height: 144))
         NSColor.black.withAlphaComponent(0.20).setFill()
         middle.fill()
         middle.lineWidth = 0.5
         middle.stroke()
 
-        let arc = NSBezierPath()
-        arc.appendArc(withCenter: center, radius: 147.5, startAngle: angle + 58.5,
-                      endAngle: angle - 58.5, clockwise: true)
-        arc.lineWidth = 4
-        arc.lineCapStyle = .round
-        NSColor.systemBlue.setStroke()
-        arc.stroke()
+        if let segment = layout.segment(for: selectedMode) {
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: layout.center, radius: segment.outerRadius - 2.5,
+                          startAngle: segment.angle + segment.sweep / 2 - 1.5,
+                          endAngle: segment.angle - segment.sweep / 2 + 1.5, clockwise: true)
+            arc.lineWidth = 4
+            arc.lineCapStyle = .round
+            NSColor.systemBlue.setStroke()
+            arc.stroke()
+        }
     }
 }

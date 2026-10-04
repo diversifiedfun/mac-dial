@@ -6,7 +6,7 @@ preview_app="$preview_build/Mac Dial Preview.app"
 mkdir -p "$preview_app/Contents/MacOS" "$preview_build/module-cache"
 xcrun swiftc -target arm64-apple-macos12.0 -module-cache-path "$preview_build/module-cache" \
     MacDial/Mode.swift MacDial/DialButtonHandler.swift MacDial/ModePickerState.swift \
-    MacDial/DialInputCoordinator.swift MacDial/RadialMenuView.swift \
+    MacDial/DialInputCoordinator.swift MacDial/RadialMenuLayout.swift MacDial/RadialMenuView.swift \
     MacDial/RadialMenuController.swift Tests/Preview/main.swift \
     -o "$preview_app/Contents/MacOS/MacDialPreview"
 cat > "$preview_app/Contents/Info.plist" <<'PLIST'
@@ -22,4 +22,6 @@ cat > "$preview_app/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 codesign --force --sign - "$preview_app"
-open -g "$preview_app"
+if [[ "${1:-}" != "--build-only" ]]; then
+    open -g "$preview_app"
+fi

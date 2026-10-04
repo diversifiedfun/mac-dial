@@ -1,88 +1,115 @@
-# Radial picker design QA
+# Grouped Lightroom radial picker — design QA
 
-**final result: passed** — native component visual comparison and view checks.
-Live desktop integration and remaining physical Dial validation are listed below.
+**final result: passed** — native component rendering and view-level behavior.
+Live desktop and physical-device checks remain unverified, as detailed below.
 
-## Evidence and comparison target
+## Comparison target and evidence
 
-- Source visual: `/var/folders/kp/2_0qdpjj3n52bfmd32ssshmh0000gn/T/codex-clipboard-ea182b6b-f309-4326-a47f-3b7e374e410f.png`.
-- Retained source: `../build/radial-render/reference-windows.png`.
+- Source visual: `../build/radial-render/reference-general-before-lightroom.png`,
+  retained from the existing approved three-mode implementation before this change.
+- Design specification: the approved Lightroom plan in this chat: four equal
+  inner wedges, a nonselectable Lightroom parent on the left, and three 30°
+  selectable outer segments. The children form a single navigation sequence
+  with Scroll, Playback, and Zoom.
 - Implementation: `../build/radial-render/images/scrolling.png`, `playback.png`,
-  `zoom.png`, `opening.png`, and `reduced-transparency-contrast.png`.
-- Viewport: native AppKit component, 300×300 points; exports are 600×600 pixels
-  at 2× density. There is no browser/CSS viewport.
-- Source: 422×384 pixels, with an approximately 382-pixel wheel. The approved
-  adaptation deliberately changes the Windows layout to three equal sectors,
-  native SF Symbols, macOS typography/material, and selection instructions.
-  Comparison uses proportions within the circular component rather than an
-  exact pixel match to Windows. Export density is interpreted at 2×; no
-  resampled screenshot or desktop screenshot is claimed.
-- The source and all three selected implementation states were opened together
-  in one comparison input. The opening state was also inspected. The entire
-  component and its small text are readable in these exports, so separate
-  focused crops were unnecessary.
+  `zoom.png`, and `lightroom-{scrolling,playback,zoom,lightroomCrop,lightroomFineTune,lightroomBrush}.png`.
+- Additional states: `opening.png`, `reduced-transparency-contrast.png`,
+  `lightroom-opening.png`, and `lightroom-reduced-transparency-contrast.png`.
+- Viewport/density: native AppKit, no CSS/browser viewport. The source and general
+  states are 300×300 points exported at 600×600 pixels. Contextual states are
+  432×432 points exported at 864×864 pixels, with the same 300-point inner wheel.
+  All exports use 2× backing, including native SF Symbol rasterization.
+- The retained source, final general state and all three Lightroom children were
+  opened together in one comparison input. General geometry, typography, spacing
+  and color were compared at identical point and pixel sizes. The new outer arc
+  was assessed against the approved specification rather than claiming a pixel
+  match to a nonexistent Lightroom reference mockup.
+- Full-size exports make icons and all center text legible; separate crops were
+  unnecessary. Opening and opaque/high-contrast states were also inspected.
 
-## Findings
+## Final findings
 
-No actionable P0/P1/P2 visual differences against the approved adaptation.
+No remaining actionable P0/P1/P2 visual differences against the approved design.
 
-- **Typography:** native system font; selected mode has a clear size hierarchy.
-  Playback and both instruction lines fit inside the center without truncation
-  or collisions. The opening state explains that release arms selection.
-- **Layout:** equal sectors retain fixed positions (Scroll top, Playback lower
-  right, Zoom lower left). Icons are centered within their sectors. Center,
-  ring, and blue selection arc remain aligned in all three states.
-- **Colors:** dark surface, brighter highlighted wedge, white symbols, and blue
-  arc preserve the reference's visual selection language. The opaque fallback
-  and stronger boundaries were rendered and inspected. Desktop-dependent blur
-  and the external window shadow cannot be verified by offscreen exports.
-- **Assets:** actual native SF Symbols render sharply at 2×. The system's valid
-  Zoom symbol is `plus.magnifyingglass`; the proposed inverse spelling was
-  corrected when the symbol-availability test caught it. No raster or drawn
-  icon substitutes are used.
-- **Copy:** labels match the existing three modes. Instructions match the
-  hold → release → turn → click interaction. Cancellation preserves the
-  saved mode; no Windows-only mode is carried into the wheel.
+- **Typography:** native system font; the general wheel retains its original
+  type hierarchy. Lightroom adds a small context label, 16-point mode name,
+  action hints and a selection instruction within the same center circle.
+  All visible text fits its bounds without truncation in automated checks.
+- **Spacing/layout:** original 108-point general icon radius and three-sector
+  positions are retained outside Lightroom. Contextual general wedges are at
+  top/right/bottom; Lightroom is left, with Crop below-left, Fine Tune left,
+  and Brush above-left. Icons sit inside their shared drawing/hit-test segments.
+  The outer extension is 66 points, and unused outer space is transparent.
+- **Colors:** dark material, brighter selected wedge, white icons and blue
+  selection arc retain the established language. Selecting a Lightroom child
+  adds a subdued blue tint to its parent. Opaque/high-contrast rendering
+  strengthens boundaries without obscuring text or the app icon.
+- **Assets:** real SF Symbols and the installed Lightroom Classic `App.icns`.
+  Bundle identity is checked before using the app icon. Symbols render sharply
+  at 2×; the preview does not recreate them as custom vector artwork.
+- **Copy:** names and hints match the requested mappings. The Lightroom parent
+  has no misleading selection or entry action. The bottom center instruction
+  describes choosing a mode; action hints describe the selected mode's use.
+- **Accessibility/input:** selectable icons are native radio-button controls;
+  Lightroom children have an accessible group. Pointer targets are 50×50
+  points. Native hit testing reaches all six controls, the parent does nothing,
+  the opening hold disables both rings, and outside space cancels. Keyboard
+  navigation, selection values, and opaque/high-contrast behavior are checked.
 
 ## Comparison history
 
-The first rendered comparison passed without a visual repair iteration. The
-invalid Zoom symbol was caught and fixed by automated checks before rendering.
+1. Initial render: [P2] Lightroom appeared as a small generic app placeholder.
+   Fixed by loading the verified installed bundle's icon resource directly,
+   with running-app and Launch Services discovery plus the standard installed
+   location as a fallback. Subsequent captures show the correct LrC icon.
+2. General-wheel comparison: [P2] shared geometry moved icons outward by three
+   points and introduced a brighter outer edge. Restored the 108-point icon
+   radius and original general boundary drawing; clipped the contextual surface
+   to its silhouette. Final general rendering matches the source layout.
+3. Export comparison: SF Symbols initially rasterized at 1× while the bitmap
+   exported at 2×, softening icons. This was a capture-density mismatch; the
+   offscreen test window now explicitly reports 2× backing. Final captures show
+   sharp symbols. This does not override production display scaling.
+4. Final comparison: source and final general/Lightroom states opened together;
+   no unresolved P0/P1/P2 visual findings. The intentional extra ring, app icon,
+   contextual labels and four-sector layout follow the approved specification.
 
 ## Verification
 
 - Apple Silicon Release build and strict code-signature verification pass.
-- 108 recording-only checks pass: gesture boundaries, delayed timers and queued
-  HID timestamps, duplicate edges, confirmation-report suppression, every
-  shared cancellation path, stale callbacks, idle timeout, mode persistence
-  mapping, sensitivity normalization, screen-edge placement (including displays
-  with negative coordinates), symbol availability, and real controller events.
-- 44 native view checks pass: accessible radio-button roles, names and selected
-  values; enabled/disabled opening states; opaque fallback; arrow/Return/Escape
-  handlers; and pointer selection for every wedge.
-- No test posts mouse, keyboard, or media input to another application.
-- The user confirmed physical long-press opening, mode selection/menu-bar
-  updates, and haptics. Scrolling, volume, and zoom were blocked by a stale
-  Accessibility grant. The permission entry was replaced with the exact new
-  build and that build was restarted; system actions have not yet been
-  confirmed after the refresh.
+- **247 recording-only behavior checks pass:** existing press thresholds,
+  cancellation and controllers; six-mode navigation and wrapping; identical
+  selection sensitivity; app-mode persistence and relaunch; inactive-app
+  rejection; stale reports and app-switch cancellation; exact key codes,
+  balanced edges, explicit modifiers and verified target PIDs.
+- **352 native-view checks pass:** shared geometry, actual native hit targets,
+  group exclusion, accessible labels/roles/values, text fit, native symbols,
+  both layouts, opening states, pointer/keyboard handlers and display fallbacks.
+- Tests use injected sinks and never post keyboard, mouse or media input to
+  another app. CoreGraphics event creation stalled inside the shell sandbox;
+  the same recording-only suite passed with host event access.
+- Hardware-free preview builds and was launched through Launch Services.
+  It simulates either profile, does not open HID, does not save preferences,
+  does not request permissions and does not send desktop events.
+- Live UI inspection was attempted, but computer-use reported that the Mac was
+  locked and could not be automatically unlocked. No live screenshot, focus,
+  VoiceOver, or physical Lightroom behavior is claimed from the offscreen tests.
 
 ## Remaining manual checks
 
-The native computer-use inspector returned `timeoutReached` both for the preview
-app path and its bundle ID. A hardware-free preview app opened successfully,
-but live screenshot and interaction verification through that inspector was
-unavailable. Offscreen exports are not a substitute for the following checks:
+1. Quit the currently running Mac Dial before opening the new local build. With
+   Lightroom Classic 15.6 focused, verify the six-item wheel and menu-bar submenu;
+   keep general behavior on first use, choose a child, switch away and return,
+   then relaunch to confirm saved choices.
+2. On disposable photos/virtual copies, check Command+Left/Right with Crop open,
+   R toggling Crop, unshifted +/= and minus changing the selected adjustment in
+   small increments, backslash Before view, bracket brush sizing, and A in the
+   Remove/spot-removal tool. Check physical rotation feel at each sensitivity.
+3. Verify native blur/shadow and keyboard-focus restoration after confirmation,
+   Escape and outside click; test over full-screen Lightroom, across Spaces and
+   near display edges. Actual multi-display presentation is still manual.
+4. Check VoiceOver grouping, Reduce Motion, Haptics, disconnect/reconnect and
+   sleep/wake, including app changes while the Dial is held.
 
-1. Quit the installed Mac Dial before launching the new local build; verify
-   hold, release, both turn directions, confirmation, cancellation, and haptics
-   using the physical Surface Dial at each sensitivity.
-2. Check keyboard focus returns to the original app after selection/Escape,
-   an outside click reaches its intended app, and switching apps dismisses.
-3. Check real placement near all screen edges, on multiple displays, and over
-   full-screen apps; verify Space/display changes dismiss the picker.
-4. Check actual translucent blur/shadow, Reduce Motion, and VoiceOver navigation.
-5. Check disconnect/reconnect and sleep/wake while a gesture or picker is active.
-
-The installed app was not replaced. The preview never connects to HID or saves
-mode preferences; its idle timeout is disabled only for inspection.
+The packaged build is `../downloads/MacDial-lightroom-modes-arm64.app.zip`.
+Installation is separate; the installed copy was not replaced.

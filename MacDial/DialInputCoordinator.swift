@@ -13,6 +13,7 @@ final class DialInputCoordinator {
     private(set) var picker: ModePickerState?
 
     private let currentMode: () -> Mode
+    private let currentProfile: () -> AppProfile?
     private let button: DialButtonHandler
     private let schedule: (TimeInterval, DispatchWorkItem) -> Void
     private var physicallyPressed = false
@@ -22,11 +23,13 @@ final class DialInputCoordinator {
     private var pickerGeneration = 0
 
     init(currentMode: @escaping () -> Mode,
+         currentProfile: @escaping () -> AppProfile? = { nil },
          button: DialButtonHandler = DialButtonHandler(),
          schedule: @escaping (TimeInterval, DispatchWorkItem) -> Void = {
              DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1)
          }) {
         self.currentMode = currentMode
+        self.currentProfile = currentProfile
         self.button = button
         self.schedule = schedule
         button.onShortPress = { [weak self] in
@@ -124,12 +127,20 @@ final class DialInputCoordinator {
         }
     }
 
+    // Stale reports still describe the physical button. Consume their edges
+    // without creating a new press in the new app's context.
+    func discard(button state: Dial.ButtonState) {
+        cancel()
+        physicallyPressed = state == .pressed
+        suppressUntilRelease = physicallyPressed
+    }
+
     private func longPressed() {
         if picker != nil {
             cancel()
         } else {
             onCancelAction?()
-            picker = ModePickerState(selectedMode: currentMode())
+            picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile())
             pickerGeneration += 1
             onFeedback?()
             publish()

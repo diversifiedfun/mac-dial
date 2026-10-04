@@ -2,13 +2,20 @@ import Foundation
 
 struct ModePickerState {
     private(set) var selectedMode: Mode
+    let profile: AppProfile?
+    let availableModes: [Mode]
     var isArmed = false
     private var accumulatedSteps = 0.0
 
-    init(selectedMode: Mode) { self.selectedMode = selectedMode }
+    init(selectedMode: Mode, profile: AppProfile? = nil) {
+        self.profile = profile
+        availableModes = profile?.availableModes ?? Mode.generalModes
+        self.selectedMode = availableModes.contains(selectedMode) ? selectedMode : .scrolling
+    }
 
     @discardableResult
     mutating func select(_ mode: Mode) -> Bool {
+        guard availableModes.contains(mode) else { return false }
         accumulatedSteps = 0
         let changed = selectedMode != mode
         selectedMode = mode
@@ -17,7 +24,7 @@ struct ModePickerState {
 
     @discardableResult
     mutating func move(by steps: Int) -> Bool {
-        select(selectedMode.advanced(by: steps))
+        select(selectedMode.advanced(by: steps, in: availableModes))
     }
 
     @discardableResult
@@ -37,7 +44,7 @@ struct ModePickerState {
         guard wholeSteps > 0 else { return false }
         let signedSteps = accumulatedSteps < 0 ? -wholeSteps : wholeSteps
         accumulatedSteps -= Double(signedSteps)
-        selectedMode = selectedMode.advanced(by: signedSteps)
+        selectedMode = selectedMode.advanced(by: signedSteps, in: availableModes)
         return true
     }
 }

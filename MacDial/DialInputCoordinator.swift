@@ -10,6 +10,7 @@ final class DialInputCoordinator {
     var onCommit: ((Mode) -> Void)?
     var onPickerChanged: ((ModePickerState?) -> Void)?
     var onFeedback: (() -> Void)?
+    var onMenuNavigationChanged: ((Bool) -> Bool)?
     private(set) var picker: ModePickerState?
 
     var menuPressDuration: MenuPressDuration {
@@ -55,8 +56,9 @@ final class DialInputCoordinator {
         button.cancel()
     }
 
-    func handle(button state: Dial.ButtonState, rotation: Dial.Rotation?,
-                sensitivity: Int, scrollDirection: Int, timestamp: TimeInterval? = nil) {
+    func handle(button state: Dial.ButtonState, rotation: Dial.Rotation?, rotationIsCurrent: Bool = true,
+                scrollDirection: Int, timestamp: TimeInterval? = nil) {
+        let rotation = rotationIsCurrent ? rotation : nil
         let hadPicker = picker != nil
         let initialPickerGeneration = pickerGeneration
         let wasArmed = picker?.isArmed == true
@@ -81,8 +83,8 @@ final class DialInputCoordinator {
             if picker != nil {
                 if changed || rotation != nil { activity() }
                 if wasArmed, !pressed, !changed, let rotation = rotation,
-                   picker?.rotate(rotation, sensitivity: sensitivity) == true {
-                    onFeedback?()
+                   picker?.rotate(rotation) == true {
+                    // Rotation already carries the hardware's automatic click.
                     publish()
                 }
             }
@@ -128,6 +130,7 @@ final class DialInputCoordinator {
         onCancelAction?()
         if wasOpen {
             pickerGeneration += 1
+            _ = onMenuNavigationChanged?(false)
             onPickerChanged?(nil)
         }
     }
@@ -147,6 +150,10 @@ final class DialInputCoordinator {
             onCancelAction?()
             picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile())
             pickerGeneration += 1
+            guard onMenuNavigationChanged?(true) ?? true else {
+                cancel()
+                return
+            }
             onFeedback?()
             publish()
         }

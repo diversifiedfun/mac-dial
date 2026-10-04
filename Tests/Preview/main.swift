@@ -56,9 +56,9 @@ final class PreviewDelegate: NSObject, NSApplicationDelegate {
 
     func open() {
         input.cancel()
-        input.handle(button: .pressed, rotation: nil, sensitivity: 36, scrollDirection: -1)
+        input.handle(button: .pressed, rotation: nil, scrollDirection: -1)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            self.input.handle(button: .released, rotation: nil, sensitivity: 36, scrollDirection: -1)
+            self.input.handle(button: .released, rotation: nil, scrollDirection: -1)
         }
     }
 

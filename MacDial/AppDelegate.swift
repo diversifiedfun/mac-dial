@@ -26,8 +26,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         requestPermissions()
-        dial.start();
         statusBarController = StatusBarController.init(dial)
+        dial.start(); // Install preferences and input callbacks before reading HID.
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {

@@ -30,7 +30,19 @@ and Zoom at the lower left. The center names the highlighted mode.
 The opening hold only opens the picker; releasing it arms selection. The current
 mode continues to be the saved mode until a subsequent short press confirms on
 release. Clockwise advances Scroll → Playback → Zoom, wrapping in either
-direction. Approximately 30° advances one choice at any Wheel Sensitivity;
+direction. Each rotation tick advances exactly one choice, with one automatic
+haptic click when Haptics is enabled. Wheel Sensitivity controls menu spacing:
+
+| Wheel Sensitivity | Menu degrees per choice | Normal ticks per revolution |
+| --- | ---: | ---: |
+| Low | 30° | 18 |
+| Medium | 20° | 36 |
+| High | 15° | 72 |
+| Extreme | 10° | 360 |
+
+Menu spacing does not depend on the number of choices. The Dial temporarily uses
+12, 18, 24, or 36 ticks per revolution while the picker is open, then restores the
+latest normal sensitivity on every exit. Saved preferences are not overwritten.
 Scroll Direction does not reverse menu navigation.
 
 You can also hover and click a segment, use the arrow keys, and press Return.
@@ -38,6 +50,10 @@ Escape, another long hold, an outside click, or 10 seconds without interaction
 cancels without changing modes. Disconnecting, changing apps/Spaces/displays,
 sleeping, selecting a mode from the menu bar, or quitting also cancels safely.
 Opening, selection, and confirmation feedback follows the Haptics setting.
+Rotating uses the hardware click without a duplicate software pulse; keyboard
+and pointer selection retain their feedback. If menu configuration fails, the
+picker cancels and attempts to restore normal sensitivity. Queued rotation from
+an earlier configuration is ignored while valid button releases are preserved.
 
 Scroll clicks now wait until a short press is released. This prevents a long
 press from clicking or dragging anything underneath the wheel. Menu gestures
@@ -61,7 +77,7 @@ group rather than another selection target.
 
 Turning still follows one continuous sequence, with no extra click to enter a
 submenu: **Scroll → Playback → Zoom → Crop & Browse → Fine Tune → Brush Size**.
-The approximately 30° selection step, hold/release gesture, cancellation,
+The sensitivity-dependent selection step, hold/release gesture, cancellation,
 keyboard navigation, and Haptics setting are the same in both layouts.
 The center shows the highlighted Lightroom mode’s turn and click actions.
 
@@ -150,16 +166,20 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The configurable-duration build, strict code-signature verification, and 403
-recording-only behavior checks pass. The prior Lightroom build also passed 352
-native-view checks. Automated checks cover all six
+The consistent-menu-clicks Release build, strict code-signature verification,
+503 recording-only behavior checks, and 352 native-view checks pass. The preview
+also compiles. The controller checks require access to native macOS services;
+in a restricted execution sandbox they can stall, so run them with that access.
+Automated checks cover the four menu sensitivity mappings, configuration failure
+recovery, restoration after dismissal, haptic suppression, queued rotation, all six
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, and placement on displays with negative coordinates.
 
-The native preview was launched, but live UI inspection was blocked by a locked
-Mac. Physical Dial validation and live focus/Space behavior remain unverified for
-this build. On Lightroom Classic 15.6, check next/previous navigation with Crop
+Physical Dial validation and live focus/Space behavior remain unverified for
+this build. At each Wheel Sensitivity, verify one felt click per menu selection
+in both directions, wraparound, Lightroom group transitions, and normal sensitivity
+after dismissal. On Lightroom Classic 15.6, check next/previous navigation with Crop
 open, fine adjustment step size, Before view, brush size and Visualize Spots,
 then leave and return to Lightroom to check mode restoration. Use disposable
 photos or virtual copies for that check. Also check the wheel over full-screen

@@ -39,12 +39,25 @@ final class Harness {
     var feedback = 0
     var presentations = 0
     var dismissals = 0
+    var configurations: [DialHardwareConfiguration] = []
+    var failNextConfiguration = false
+    lazy var configuration = DialConfigurationController { [unowned self] value in
+        self.configurations.append(value)
+        if self.failNextConfiguration {
+            self.failNextConfiguration = false
+            return false
+        }
+        return true
+    }
     lazy var button = DialButtonHandler(now: { [unowned self] in self.clock.time },
                                        schedule: { [unowned self] in self.clock.schedule($0, $1) })
     lazy var input = DialInputCoordinator(currentMode: { [unowned self] in self.mode },
                                          currentProfile: { [unowned self] in self.profile }, button: button,
                                          schedule: { [unowned self] in self.clock.schedule($0, $1) })
     init() {
+        configuration.update(haptics: true)
+        configuration.didConnect()
+        input.onMenuNavigationChanged = { [unowned self] in self.configuration.setMenuNavigationActive($0) }
         input.onShortPress = { [unowned self] in self.clicks += 1 }
         input.onRotation = { [unowned self] _, direction in self.rotations.append(direction) }
         input.onCommit = { [unowned self] mode in
@@ -56,11 +69,15 @@ final class Harness {
             if state == nil { self.dismissals += 1 }
             else { self.presentations += 1 }
         }
-        input.onFeedback = { [unowned self] in self.feedback += 1 }
+        input.onFeedback = { [unowned self] in
+            self.configuration.performFeedback { self.feedback += 1 }
+        }
     }
     func report(_ state: Dial.ButtonState, _ rotation: Dial.Rotation? = nil,
-                sensitivity: Int = 36, direction: Int = -1) {
-        input.handle(button: state, rotation: rotation, sensitivity: sensitivity, scrollDirection: direction)
+                direction: Int = -1, generation: UInt64? = nil) {
+        input.handle(button: state, rotation: rotation,
+                     rotationIsCurrent: generation.map(configuration.acceptsRotation) ?? true,
+                     scrollDirection: direction)
     }
     func open() {
         report(.pressed)
@@ -72,6 +89,176 @@ final class Harness {
         clock.advance(0.1)
         report(.released)
     }
+}
+
+// Recording transport: real configuration policy and gesture routing, no HID.
+for (sensitivity, normal, menu) in [(WheelSensitivity.low, 18, 12), (.medium, 36, 18),
+                                  (.high, 72, 24), (.extreme, 360, 36)] {
+    let h = Harness()
+    h.configuration.update(sensitivity: sensitivity)
+    check(h.configurations.last == DialHardwareConfiguration(ticksPerRevolution: normal, haptics: true),
+          "Normal sensitivity keeps its existing mapping")
+    let before = h.configuration.withInputContext { 0 }.generation
+    h.open()
+    check(h.configurations.last == DialHardwareConfiguration(ticksPerRevolution: menu, haptics: true),
+          "Menu uses the agreed sensitivity mapping")
+    check(!h.configuration.acceptsRotation(before), "Opening invalidates queued normal rotation")
+    let writes = h.configurations.count
+    let openingFeedback = h.feedback
+    for _ in 0..<7 { h.report(.released, .Clockwise(1)) }
+    check(h.input.picker?.selectedMode == .playback, "Seven clicks advance seven choices")
+    check(h.configurations.count == writes, "Selection does not repeatedly reprogram hardware")
+    check(h.feedback == openingFeedback, "Dial rotation never adds a software haptic")
+    h.input.moveSelection(by: 1)
+    check(h.feedback == openingFeedback + 1, "Keyboard selection retains its software haptic")
+    h.input.highlight(.scrolling)
+    check(h.feedback == openingFeedback + 2, "Pointer selection retains its software haptic")
+    h.click()
+    check(h.feedback == openingFeedback + 3, "Confirmation retains its software haptic")
+    check(h.configurations.last?.ticksPerRevolution == normal, "Confirmation restores normal sensitivity")
+    for profile: AppProfile? in [nil, .lightroom] {
+        h.profile = profile
+        h.open()
+        check(h.configurations.last?.ticksPerRevolution == menu, "Choice count does not change menu spacing")
+        h.input.cancel()
+    }
+}
+
+do {
+    let h = Harness()
+    h.open()
+    h.configuration.update(sensitivity: .extreme)
+    check(h.configurations.last?.ticksPerRevolution == 36, "Preference changes use the menu mapping while open")
+    h.input.cancel()
+    check(h.configurations.last?.ticksPerRevolution == 360, "Closing restores the latest preference")
+    h.configuration.update(haptics: false)
+    let feedback = h.feedback
+    h.open()
+    h.report(.released, .Clockwise(1))
+    check(h.input.picker?.selectedMode == .playback, "Haptics disabled still advances one choice per tick")
+    h.input.moveSelection(by: 1)
+    h.input.highlight(.scrolling)
+    h.click()
+    check(h.feedback == feedback && h.configurations.last?.haptics == false,
+          "Disabled haptics suppresses both hardware and software feedback")
+    h.open()
+    h.configuration.update(haptics: true)
+    check(h.configurations.last?.ticksPerRevolution == 36 && h.configurations.last?.haptics == true,
+          "Enabling haptics while open preserves menu sensitivity")
+    let token = h.configuration.withInputContext { 0 }.generation
+    let writes = h.configurations.count
+    h.configuration.update(haptics: true)
+    check(h.configurations.count == writes && h.configuration.acceptsRotation(token),
+          "Unchanged preferences do not write hardware or discard input")
+}
+
+// All non-confirming exits share the same restoration callback.
+for reason in ["escape", "outside click", "lost focus", "app change", "space change", "display change",
+               "sleep", "menu-bar mode", "timeout", "second hold", "shutdown", "presentation failure"] {
+    let h = Harness()
+    h.configuration.update(sensitivity: .low)
+    if reason == "presentation failure" {
+        h.input.onPickerChanged = { state in if state != nil { h.input.cancel() } }
+    }
+    h.open()
+    if reason == "timeout" { h.clock.advance(10) }
+    else if reason == "second hold" {
+        h.report(.pressed)
+        h.clock.advance(h.input.menuPressDuration.seconds)
+        h.report(.released, .Clockwise(1))
+    } else { h.input.cancel() }
+    check(h.input.picker == nil && h.configurations.last?.ticksPerRevolution == 18,
+          "\(reason) restores normal sensitivity")
+    check(h.commits.isEmpty && h.rotations.isEmpty && h.clicks == 0,
+          "\(reason) cannot commit or leak an action")
+    if reason == "shutdown" {
+        h.configuration.shutdown()
+        check(h.configurations.last == DialHardwareConfiguration(ticksPerRevolution: 18, haptics: false),
+              "Shutdown restores normal spacing and silences the device")
+        h.configuration.didConnect()
+        check(h.configurations.last?.haptics == true, "Shutdown does not overwrite the haptics preference")
+    }
+}
+
+do {
+    let h = Harness()
+    h.configuration.update(sensitivity: .high)
+    h.open()
+    let queued = h.configuration.withInputContext { 0 }.generation
+    h.configuration.didDisconnect()
+    h.input.cancel()
+    check(!h.configuration.acceptsRotation(queued), "Disconnect invalidates pending menu input")
+    let writes = h.configurations.count
+    h.configuration.update(sensitivity: .low, haptics: false)
+    check(h.configurations.count == writes, "Disconnected preference changes do not write the transport")
+    check(!h.configuration.setMenuNavigationActive(true), "A disconnected device cannot enter menu configuration")
+    h.configuration.didConnect()
+    check(h.configurations.last == DialHardwareConfiguration(ticksPerRevolution: 18, haptics: false),
+          "Reconnect restores the latest normal preferences")
+}
+
+do {
+    let h = Harness()
+    let normalGeneration = h.configuration.withInputContext { 0 }.generation
+    h.report(.pressed)
+    h.clock.advance(h.input.menuPressDuration.seconds)
+    h.report(.released, .Clockwise(1), generation: normalGeneration)
+    check(h.input.picker?.isArmed == true && h.input.picker?.selectedMode == .scrolling,
+          "An old generation release arms the menu without rotating or cancelling it")
+    let menuGeneration = h.configuration.withInputContext { 0 }.generation
+    h.report(.released, .Clockwise(1), generation: normalGeneration)
+    check(h.input.picker?.selectedMode == .scrolling, "Old normal ticks cannot advance the open menu")
+    h.report(.released, .Clockwise(1), generation: menuGeneration)
+    check(h.input.picker?.selectedMode == .playback, "The first current tick advances immediately")
+    h.report(.pressed, generation: menuGeneration)
+    h.configuration.update(sensitivity: .high)
+    h.clock.advance(0.1)
+    h.report(.released, .Clockwise(3), generation: menuGeneration)
+    check(h.commits == [.playback] && h.rotations.isEmpty && h.clicks == 0,
+          "A stale rotation still delivers its confirmation release without leaking actions")
+    h.report(.released, .Clockwise(1), generation: menuGeneration)
+    check(h.rotations.isEmpty, "Queued menu ticks cannot escape into the selected controller")
+    let current = h.configuration.withInputContext { 0 }.generation
+    h.report(.released, .Clockwise(1), generation: current)
+    check(h.rotations == [-1], "The first fresh normal tick resumes the selected controller")
+}
+
+do {
+    let h = Harness()
+    h.failNextConfiguration = true
+    h.open()
+    check(h.input.picker == nil && h.configurations.suffix(2).map(\.ticksPerRevolution) == [18, 36],
+          "A failed menu write cancels opening and restores normal configuration")
+    check(h.feedback == 0 && h.clicks == 0 && h.rotations.isEmpty,
+          "Failed opening neither announces success nor leaks an action")
+    h.click()
+    check(h.clicks == 1, "Input recovers after a failed opening")
+    h.open()
+    h.failNextConfiguration = true
+    if !h.configuration.update(sensitivity: .high) { h.input.cancel() }
+    check(h.input.picker == nil && h.configurations.last?.ticksPerRevolution == 72,
+          "A failed preference change closes the menu and restores the new normal preference")
+}
+
+do {
+    var fail = false
+    var writes: [DialHardwareConfiguration] = []
+    let configuration = DialConfigurationController { value in
+        writes.append(value)
+        return !fail
+    }
+    configuration.didConnect()
+    fail = true
+    check(!configuration.setMenuNavigationActive(true), "Both failed menu and restore writes report failure")
+    let token = configuration.withInputContext { 0 }.generation
+    check(!configuration.acceptsRotation(token), "Unconfigured hardware cannot route rotation")
+    fail = false
+    check(configuration.setMenuNavigationActive(false), "Normal configuration can be retried after failure")
+    let recovered = configuration.withInputContext { 0 }.generation
+    check(configuration.acceptsRotation(recovered) && !configuration.acceptsRotation(token),
+          "Only input read after configuration recovers is accepted")
+    let report = DialHardwareConfiguration(ticksPerRevolution: 360, haptics: true).featureReport
+    check(report == [1, 0x68, 0x01, 0, 3, 0, 0, 0], "HID configuration preserves both sensitivity bytes")
 }
 
 check(Harness().input.menuPressDuration == .ms600, "Existing users retain the 600 ms default")
@@ -119,8 +306,8 @@ for option in MenuPressDuration.allCases {
         let h = Harness()
         h.input.menuPressDuration = option
         h.clock.time = 10
-        h.input.handle(button: .pressed, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: 0)
-        h.input.handle(button: .released, rotation: nil, sensitivity: 36, scrollDirection: -1, timestamp: duration)
+        h.input.handle(button: .pressed, rotation: nil, scrollDirection: -1, timestamp: 0)
+        h.input.handle(button: .released, rotation: nil, scrollDirection: -1, timestamp: duration)
         check(h.clicks == (duration < threshold ? 1 : 0), "Queued reports preserve real press duration")
         check((h.input.picker != nil) == (duration >= threshold), "A main-queue stall cannot misclassify a hold")
         let presentations = h.presentations
@@ -186,11 +373,9 @@ do {
     h.report(.released, .Clockwise(30))
     check(h.input.picker?.isArmed == true && h.input.picker?.selectedMode == .scrolling,
           "Opening release only arms; its rotation is consumed")
-    h.report(.released, .Clockwise(2))
-    check(h.input.picker?.selectedMode == .scrolling, "Subthreshold rotation accumulates")
     h.report(.released, .Clockwise(1))
     check(h.input.picker?.selectedMode == .playback && h.mode == .scrolling,
-          "Thirty degrees highlights Playback without committing")
+          "One tick highlights Playback without committing")
     h.report(.pressed, .Clockwise(3))
     h.clock.advance(0.1)
     h.report(.released, .Clockwise(3))
@@ -278,7 +463,7 @@ do {
     h.open()
     h.clock.advance(9)
     let staleIdle = h.clock.pending.first { $0.0 > h.clock.time }!.1
-    h.report(.released, .Clockwise(1)) // activity even below a selection threshold
+    h.report(.released, .Clockwise(1)) // any real browsing activity
     h.clock.advance(1.1)
     staleIdle.perform()
     check(h.input.picker != nil, "Any real browsing activity resets the idle timer")
@@ -297,17 +482,15 @@ do {
           "Timeout during the opening hold consumes its eventual release")
 }
 
-for sensitivity in [18, 36, 72, 360] {
-    var picker = ModePickerState(selectedMode: .scrolling)
-    for _ in 0..<(sensitivity / 3) { picker.rotate(.Clockwise(1), sensitivity: sensitivity) }
-    check(picker.selectedMode == .playback, "120 physical degrees advances four selections at every sensitivity")
-    for _ in 0..<(sensitivity / 3) { picker.rotate(.CounterClockwise(1), sensitivity: sensitivity) }
-    check(picker.selectedMode == .scrolling, "Reverse rotation has the same normalized sensitivity")
+for sensitivity in WheelSensitivity.allCases {
     let h = Harness()
+    h.configuration.update(sensitivity: sensitivity)
     h.open()
-    h.report(.released, .Clockwise(sensitivity / 3), sensitivity: sensitivity, direction: -1)
+    h.report(.released, .Clockwise(1), direction: -1)
     check(h.input.picker?.selectedMode == .playback && h.rotations.isEmpty,
-          "Natural scrolling does not reverse picker navigation")
+          "Every sensitivity advances one choice; natural scrolling does not reverse navigation")
+    h.report(.released, .CounterClockwise(1))
+    check(h.input.picker?.selectedMode == .scrolling, "Reversal takes exactly one tick")
 }
 
 do {
@@ -325,17 +508,16 @@ do {
 
 do {
     var picker = ModePickerState(selectedMode: .scrolling)
-    picker.rotate(.Clockwise(2), sensitivity: 36)
-    picker.rotate(.CounterClockwise(2), sensitivity: 36)
-    check(picker.selectedMode == .scrolling, "Opposing partial movement cancels")
-    picker.rotate(.Clockwise(2), sensitivity: 36)
+    picker.rotate(.Clockwise(2))
+    picker.rotate(.CounterClockwise(2))
+    check(picker.selectedMode == .scrolling, "Opposing multi-tick movement returns to the starting choice")
+    picker.rotate(.Clockwise(2))
     picker.select(.zoom)
-    picker.rotate(.Clockwise(1), sensitivity: 36)
-    check(picker.selectedMode == .zoom, "Pointer selection clears fractional rotation")
-    picker.rotate(.Clockwise(0), sensitivity: 36)
-    picker.rotate(.CounterClockwise(-1), sensitivity: 36)
-    picker.rotate(.Clockwise(1), sensitivity: 0)
-    check(picker.selectedMode == .zoom, "Invalid rotation and sensitivity are ignored")
+    picker.rotate(.Clockwise(1))
+    check(picker.selectedMode == .scrolling, "One tick after pointer selection immediately advances")
+    picker.rotate(.Clockwise(0))
+    picker.rotate(.CounterClockwise(-1))
+    check(picker.selectedMode == .scrolling, "Invalid rotation counts are ignored")
 }
 
 for mode in Mode.allCases {
@@ -447,10 +629,12 @@ for start in lightroomModes {
     picker.move(by: -6)
     check(picker.selectedMode == start, "Reverse navigation wraps all six choices")
 }
-for sensitivity in [18, 36, 72, 360] {
+for count in [1, 2, 4, 6, 13] {
     var picker = ModePickerState(selectedMode: .zoom, profile: .lightroom)
-    picker.rotate(.Clockwise(sensitivity / 3), sensitivity: sensitivity)
-    check(picker.selectedMode == .scrolling, "Lightroom uses the same twelve selection steps per revolution")
+    picker.rotate(.Clockwise(count))
+    check(picker.selectedMode == lightroomModes[(2 + count) % 6], "Each tick advances one Lightroom choice")
+    picker.rotate(.CounterClockwise(count))
+    check(picker.selectedMode == .zoom, "Multi-tick reversal crosses groups and wraps correctly")
 }
 var unavailable = ModePickerState(selectedMode: .lightroomCrop)
 check(unavailable.selectedMode == .scrolling && !unavailable.select(.lightroomBrush),

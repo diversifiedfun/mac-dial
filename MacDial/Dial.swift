@@ -45,13 +45,10 @@ class Dial
         static let VendorId: UInt16 = 0x045E
         static let ProductId: UInt16 = 0x091B
         private var dev: OpaquePointer?
+        private let ioLock = NSRecursiveLock()
         private let readBuffer = ReadBuffer(size: 1024)
         
-        var wheelSensivitity = 36
-        
         var scrollDirection = 1
-        
-        var haptics = false
         
         init() {
             
@@ -59,12 +56,14 @@ class Dial
         
         var isConnected: Bool {
             get {
+                ioLock.lock(); defer { ioLock.unlock() }
                 return dev != nil
             }
         }
         
         var manufacturer: String {
             get {
+                ioLock.lock(); defer { ioLock.unlock() }
                 
                 guard let dev = self.dev else {
                     return ""
@@ -80,6 +79,7 @@ class Dial
         
         var serialNumber: String {
             get {
+                ioLock.lock(); defer { ioLock.unlock() }
                 guard let dev = self.dev else {
                     return ""
                 }
@@ -93,12 +93,14 @@ class Dial
         
         @discardableResult
         func connect() -> Bool {
+            ioLock.lock(); defer { ioLock.unlock() }
             dev = hid_open(Dial.Device.VendorId, Dial.Device.ProductId, nil)
             return isConnected
         }
         
         
         func disconnect() {
+            ioLock.lock(); defer { ioLock.unlock() }
             if let dev = self.dev {
                 hid_close(dev)
             }
@@ -106,25 +108,15 @@ class Dial
         }
         
         // https://github.com/daniel5151/surface-dial-linux/blob/main/src/dial_device/haptics.rs
-        func updateSensitivity() {
-            if isConnected {
-                let steps_lo = wheelSensivitity & 0xff;
-                let steps_hi = (wheelSensivitity >> 8) & 0xff;
-                var buf: Array<UInt8> = []
-                buf.append(1)
-                buf.append(UInt8(steps_lo)) // steps
-                buf.append(UInt8(steps_hi)) // steps
-                buf.append(0x00) // Repeat Count
-                buf.append(self.haptics ? 0x03 : 0x02) // auto trigger
-                buf.append(0x00) // Waveform Cutoff Time
-                buf.append(0x00) // retrigger period
-                buf.append(0x00) // retrigger period
-                
-                hid_send_feature_report(dev, buf, 8)
-            }
+        func configure(_ configuration: DialHardwareConfiguration) -> Bool {
+            ioLock.lock(); defer { ioLock.unlock() }
+            guard let dev = dev else { return false }
+            let report = configuration.featureReport
+            return hid_send_feature_report(dev, report, report.count) == report.count
         }
         
         func impact(repeatCount: UInt8 = 0) {
+            ioLock.lock(); defer { ioLock.unlock() }
             if isConnected {
                 var buf: Array<UInt8> = []
                 buf.append(0x01) // Report ID
@@ -160,15 +152,18 @@ class Dial
         
         func read() -> InputReport?
         {
+            ioLock.lock(); defer { ioLock.unlock() }
             guard let dev = self.dev else {
                 return nil
             }
             
-            let readBytes = hid_read(dev, readBuffer.pointer, readBuffer.size)
+            // Bound reads so configuration never waits for physical input.
+            let readBytes = hid_read_timeout(dev, readBuffer.pointer, readBuffer.size, 20)
+            if readBytes == 0 { return .unknown }
             
             if readBytes <= 0 {
                 print("Device disconnected")
-                self.dev = nil;
+                disconnect()
                 return nil;
             }
             
@@ -184,20 +179,30 @@ class Dial
     private var thread: Thread?
     private var run: Bool = false
     let device = Device()
+    private let configuration: DialConfigurationController
     private let semaphore = DispatchSemaphore(value: 0)
     
-    var onInput: ((InputReport, TimeInterval) -> Void)?
+    var onInput: ((InputReport, TimeInterval, UInt64) -> Void)?
     var onDisconnected: (() -> Void)?
     
-    var wheelSensitivity: Int {
-        get {
-            return device.wheelSensivitity
-        }
-        
-        set (value) {
-            device.wheelSensivitity = value
-            device.updateSensitivity()
-        }
+    @discardableResult
+    func updatePreferences(sensitivity: WheelSensitivity? = nil, haptics: Bool? = nil) -> Bool {
+        configuration.update(sensitivity: sensitivity, haptics: haptics)
+    }
+
+    @discardableResult
+    func setMenuNavigationActive(_ active: Bool) -> Bool {
+        let success = configuration.setMenuNavigationActive(active)
+        if !success { print("Could not apply Dial menu configuration; restoring normal sensitivity.") }
+        return success
+    }
+
+    func acceptsRotation(_ generation: UInt64) -> Bool {
+        configuration.acceptsRotation(generation)
+    }
+
+    func feedback() {
+        configuration.performFeedback { device.impact() }
     }
     
     var scrollDirection: Int {
@@ -210,18 +215,9 @@ class Dial
         }
     }
     
-    var haptics: Bool {
-        get {
-            return device.haptics
-        }
-        
-        set (value) {
-            device.haptics = value
-            device.updateSensitivity()
-        }
-    }
-    
     init() {
+        let device = self.device
+        configuration = DialConfigurationController(apply: { device.configure($0) })
         hid_init()
     }
     
@@ -238,9 +234,8 @@ class Dial
     }
     
     func stop() {
-        self.haptics = false
-        self.wheelSensitivity = 36
         run = false;
+        configuration.shutdown()
         if let thread = self.thread {
             semaphore.signal()
             device.disconnect()
@@ -276,7 +271,12 @@ class Dial
                 print("Trying to open device...")
                 if device.connect() {
                     print("Device \(device.serialNumber) opened.")
-                    device.updateSensitivity() // thanks @bernhard-adobe
+                    if !configuration.didConnect() {
+                        print("Could not configure Dial after connecting.")
+                        device.disconnect()
+                        configuration.didDisconnect()
+                        onDisconnected?()
+                    }
                 } else {
                     print("Device couldn't be opened.")
                 }
@@ -284,17 +284,19 @@ class Dial
             
             while device.isConnected {
                 
-                switch device.read() {
+                let input = configuration.withInputContext { device.read() }
+                switch input.value {
                 
                 case .dial(let buttonState, let rotation):
                     // Deliver one complete report. The main-queue router must
                     // consume a confirmation release and its rotation together.
-                    onInput?(.dial(buttonState, rotation), ProcessInfo.processInfo.systemUptime)
+                    onInput?(.dial(buttonState, rotation), ProcessInfo.processInfo.systemUptime, input.generation)
 
                 case .unknown:
-                    print("Unknown input report.")
+                    break
                 case nil:
                     print("Device disconnected.")
+                    configuration.didDisconnect()
                     onDisconnected?()
                 }
             }

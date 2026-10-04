@@ -2,13 +2,6 @@
 import Foundation
 import AppKit
 
-enum WheelSensitivity: String {
-    case low = "low"
-    case medium = "medium"
-    case high = "high"
-    case extreme = "extreme"
-}
-
 enum ScrollDirection: String {
     case standard = "standard"
     case natural = "natural"
@@ -175,20 +168,8 @@ class StatusBarController
             return WheelSensitivity(rawValue: raw)
         }
         set (sensitivity) {
-            switch sensitivity {
-            case .low:
-                dial.wheelSensitivity = 18
-                break
-            case .medium:
-                dial.wheelSensitivity = 36
-                break
-            case .high:
-                dial.wheelSensitivity = 72
-                break
-            case .extreme:
-                dial.wheelSensitivity = 360
-            case .none:
-                break
+            if !dial.updatePreferences(sensitivity: sensitivity ?? .medium) {
+                input.cancel()
             }
             for option in menuItems.wheelSensitivityOptions {
                 option.state = (option.representedObject as! WheelSensitivity) == sensitivity ? .on : .off
@@ -239,15 +220,8 @@ class StatusBarController
             return HapticsMode(rawValue: raw)
         }
         set (hapticsModeSet) {
-            switch hapticsModeSet {
-            case .disabled:
-                dial.haptics = false
-                break
-            case .enabled:
-                dial.haptics = true
-                break
-            case .none:
-                break
+            if !dial.updatePreferences(haptics: hapticsModeSet == .enabled) {
+                input.cancel()
             }
             for option in menuItems.hapticsModeOptions {
                 option.state = (option.representedObject as! HapticsMode) == hapticsModeSet ? .on : .off
@@ -344,9 +318,9 @@ class StatusBarController
         }
         input.onCancelAction = { [weak self] in self?.currentController.onCancel() }
         input.onCommit = { [weak self] mode in self?.applyMode(mode) }
-        input.onFeedback = { [weak self] in
-            guard let self = self, self.hapticsMode == .enabled else { return }
-            self.dial.device.impact()
+        input.onFeedback = { [weak self] in self?.dial.feedback() }
+        input.onMenuNavigationChanged = { [weak self] active in
+            self?.dial.setMenuNavigationActive(active) ?? false
         }
         input.onPickerChanged = { [weak self] state in
             guard let self = self else { return }
@@ -366,7 +340,7 @@ class StatusBarController
         radialMenu.view.onCancel = { [weak self] in self?.cancelPendingInput() }
 
         let gate = inputGate
-        dial.onInput = { [weak self] report, timestamp in
+        dial.onInput = { [weak self] report, timestamp, configurationGeneration in
             let token = gate.token
             DispatchQueue.main.async {
                 guard let self = self, case let .dial(button, rotation) = report else { return }
@@ -375,8 +349,10 @@ class StatusBarController
                     self.input.discard(button: button)
                     return
                 }
+                // A sensitivity transition invalidates only rotation. Preserve
+                // release edges so an opening hold still arms the new picker.
                 self.input.handle(button: button, rotation: rotation,
-                                  sensitivity: self.dial.wheelSensitivity,
+                                  rotationIsCurrent: self.dial.acceptsRotation(configurationGeneration),
                                   scrollDirection: self.dial.scrollDirection, timestamp: timestamp)
             }
         }

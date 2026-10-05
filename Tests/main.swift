@@ -667,9 +667,13 @@ check(relaunched.currentMode == .scrolling, "A general choice in Lightroom survi
 defaults.set("unknown-future-mode", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
 check(relaunched.currentMode == .playback, "An unknown app preference falls back to the saved general mode")
 relaunched.select(.lightroomBrush)
+check(defaults.string(forKey: "appMode." + AppProfile.lightroom.bundleIdentifier) == "lightroomBrush",
+      "Remove keeps the existing saved preference value")
+defaults.set("lightroomBrush", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
 let reopened = AppModeContext(defaults: defaults)
 reopened.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
-check(reopened.currentMode == .lightroomBrush, "A Lightroom child survives relaunch")
+check(reopened.currentMode == .lightroomBrush && reopened.currentMode.title == "Remove",
+      "An existing lightroomBrush preference reopens as Remove")
 relaunched.activate(bundleIdentifier: "com.adobe.Lightroom")
 check(relaunched.profile == nil && relaunched.currentMode == .playback, "Cloud Lightroom does not match the Classic profile")
 defaults.removePersistentDomain(forName: suite)
@@ -737,7 +741,7 @@ for screen in [NSRect(x: 0, y: 25, width: 1440, height: 875), NSRect(x: -1920, y
 for (mode, clockwise, counterclockwise, click) in [
     (Mode.lightroomCrop, kVK_RightArrow, kVK_LeftArrow, kVK_ANSI_R),
     (.lightroomFineTune, kVK_ANSI_Equal, kVK_ANSI_Minus, kVK_ANSI_Backslash),
-    (.lightroomBrush, kVK_ANSI_RightBracket, kVK_ANSI_LeftBracket, kVK_ANSI_A)
+    (.lightroomBrush, kVK_ANSI_RightBracket, kVK_ANSI_LeftBracket, kVK_ANSI_Q)
 ] {
     var events: [CGEvent] = []
     var pids: [pid_t] = []

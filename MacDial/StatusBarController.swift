@@ -51,6 +51,8 @@ class ControllerOptionItem: MenuOptionItem<Mode>
     init(title: String, mode: Mode, controller: Controller) {
         self.controller = controller
         super.init(title: title, option: mode)
+        toolTip = mode.usageHelp
+        setAccessibilityHelp(mode.usageHelp)
     }
     
     required init(coder: NSCoder) {
@@ -429,6 +431,8 @@ class StatusBarController
         button.image?.size = NSSize(width: 18, height: 18)
         let context = modeContext.profile.map { "\($0.title) — " } ?? ""
         button.toolTip = "Mac Dial — \(context)\(mode.title). Hold, release, turn, then click to choose a mode."
+            + (mode.usageHelp.map { " " + $0 } ?? "")
+        button.setAccessibilityHelp(mode.usageHelp)
         button.imagePosition = .imageLeft
     }
 

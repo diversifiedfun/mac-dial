@@ -120,8 +120,10 @@ final class RadialMenuView: NSView {
             button.frame = NSRect(x: p.x - 25, y: p.y - 25, width: 50, height: 50)
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityLabel("\(mode.title) mode")
+            button.toolTip = mode.usageHelp
             button.setAccessibilityHelp(mode.isLightroom
                 ? "Lightroom. \(mode.turnHint). \(mode.clickHint). Turn to choose; click to select."
+                    + (mode.usageHelp.map { " " + $0 } ?? "")
                 : "Select \(mode.title) for the Surface Dial")
             if menuLayout.profile?.modes.contains(mode) == true { appGroup.addSubview(button) }
             else { addSubview(button) }

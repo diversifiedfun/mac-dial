@@ -1,7 +1,8 @@
 # Grouped Lightroom radial picker — design QA
 
 **final result: passed** — native component rendering and view-level behavior.
-Live desktop and physical-device checks remain unverified, as detailed below.
+Remove's live Lightroom keyboard shortcuts also pass; physical-device and
+full picker desktop checks remain unverified, as detailed below.
 
 ## Comparison target and evidence
 
@@ -38,7 +39,7 @@ No remaining actionable P0/P1/P2 visual differences against the approved design.
 - **Spacing/layout:** original 108-point general icon radius and three-sector
   positions are retained outside Lightroom. Contextual general wedges are at
   top/right/bottom; Lightroom is left, with Crop below-left, Fine Tune left,
-  and Brush above-left. Icons sit inside their shared drawing/hit-test segments.
+  and Remove above-left. Icons sit inside their shared drawing/hit-test segments.
   The outer extension is 66 points, and unused outer space is transparent.
 - **Colors:** dark material, brighter selected wedge, white icons and blue
   selection arc retain the established language. Selecting a Lightroom child
@@ -73,27 +74,37 @@ No remaining actionable P0/P1/P2 visual differences against the approved design.
 4. Final comparison: source and final general/Lightroom states opened together;
    no unresolved P0/P1/P2 visual findings. The intentional extra ring, app icon,
    contextual labels and four-sector layout follow the approved specification.
+5. Remove rename: compared `../build/radial-render/reference-remove-before-rename.png`
+   with the updated `lightroom-lightroomBrush.png` at the same 864×864 size.
+   The title and hints now read Remove, Turn: Remove size, and Click: Remove (Q).
+   Text fits cleanly; geometry, icon, colors and typography are unchanged.
+   Pointer tooltips and accessibility help include the inactive-tool rating guidance.
 
 ## Verification
 
 - Apple Silicon Release build and strict code-signature verification pass.
-- **247 recording-only behavior checks pass:** existing press thresholds,
+- **504 recording-only behavior checks pass:** existing press thresholds,
   cancellation and controllers; six-mode navigation and wrapping; identical
   selection sensitivity; app-mode persistence and relaunch; inactive-app
   rejection; stale reports and app-switch cancellation; exact key codes,
-  balanced edges, explicit modifiers and verified target PIDs.
-- **352 native-view checks pass:** shared geometry, actual native hit targets,
+  balanced edges, explicit modifiers and verified target PIDs; the Q click mapping
+  and legacy `lightroomBrush` preferences reopening as Remove.
+- **364 native-view checks pass:** shared geometry, actual native hit targets,
   group exclusion, accessible labels/roles/values, text fit, native symbols,
-  both layouts, opening states, pointer/keyboard handlers and display fallbacks.
+  both layouts, opening states, pointer/keyboard handlers and display fallbacks;
+  Remove's pointer tooltip and accessibility rating guidance.
 - Tests use injected sinks and never post keyboard, mouse or media input to
   another app. CoreGraphics event creation stalled inside the shell sandbox;
   the same recording-only suite passed with host event access.
 - Hardware-free preview builds and was launched through Launch Services.
   It simulates either profile, does not open HID, does not save preferences,
   does not request permissions and does not send desktop events.
-- Live UI inspection was attempted, but computer-use reported that the Mac was
-  locked and could not be automatically unlocked. No live screenshot, focus,
-  VoiceOver, or physical Lightroom behavior is claimed from the offscreen tests.
+- The earlier picker inspection was blocked by a locked desktop. The Remove
+  update's live Lightroom keyboard check succeeded on a temporary virtual copy:
+  Q opened Remove, ] changed Size from 14 to 15, [ restored 14, and Q closed it.
+  Undo Create Virtual Copy then removed the test copy and restored the original
+  photo selection. No removal strokes or rating changes were made. This checks
+  Lightroom's shortcuts, not physical Dial input or the new app's live picker.
 
 ## Remaining manual checks
 
@@ -103,13 +114,14 @@ No remaining actionable P0/P1/P2 visual differences against the approved design.
    then relaunch to confirm saved choices.
 2. On disposable photos/virtual copies, check Command+Left/Right with Crop open,
    R toggling Crop, unshifted +/= and minus changing the selected adjustment in
-   small increments, backslash Before view, bracket brush sizing, and A in the
-   Remove/spot-removal tool. Check physical rotation feel at each sensitivity.
+   small increments, backslash Before view, bracket sizing with Remove active,
+   and repeated Q clicks toggling Remove. Check physical rotation feel at each sensitivity.
 3. Verify native blur/shadow and keyboard-focus restoration after confirmation,
    Escape and outside click; test over full-screen Lightroom, across Spaces and
    near display edges. Actual multi-display presentation is still manual.
 4. Check VoiceOver grouping, Reduce Motion, Haptics, disconnect/reconnect and
    sleep/wake, including app changes while the Dial is held.
 
-The packaged build is `../downloads/MacDial-lightroom-modes-arm64.app.zip`.
-Installation is separate; the installed copy was not replaced.
+The updated app is `../build/Build/Products/Release/MacDial.app`.
+The earlier `../downloads/MacDial-lightroom-modes-arm64.app.zip` archive predates
+this rename. Installation is separate; the installed copy was not replaced.

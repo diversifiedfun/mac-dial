@@ -76,7 +76,7 @@ Lightroom’s installed app icon identifies its parent wedge, which is a visual
 group rather than another selection target.
 
 Turning still follows one continuous sequence, with no extra click to enter a
-submenu: **Scroll → Playback → Zoom → Crop & Browse → Fine Tune → Brush Size**.
+submenu: **Scroll → Playback → Zoom → Crop & Browse → Fine Tune → Remove**.
 The sensitivity-dependent selection step, hold/release gesture, cancellation,
 keyboard navigation, and Haptics setting are the same in both layouts.
 The center shows the highlighted Lightroom mode’s turn and click actions.
@@ -85,24 +85,28 @@ The center shows the highlighted Lightroom mode’s turn and click actions.
 | --- | --- | --- | --- |
 | Crop & Browse | Next image: Command+Right | Previous image: Command+Left | R — Crop |
 | Fine Tune | Increase selected adjustment: +/= | Decrease selected adjustment: − | Backslash — Before view |
-| Brush Size | Larger brush: ] | Smaller brush: [ | A — Visualize Spots |
+| Remove | Larger Remove size: ] | Smaller Remove size: [ | Q — Toggle Remove |
 
 Each reported rotation step sends one balanced key pair. Wheel Sensitivity
 controls the number of steps per revolution; Scroll Direction does not reverse
 Lightroom actions. Fine Tune sends the unshifted U.S. +/= key and minus key for
 small increments, without adding Shift for coarse increments.
 
-Selecting a mode only changes the Dial mapping. Choose the relevant Lightroom
-tool or adjustment yourself: Fine Tune acts on the selected adjustment, while
-Visualize Spots requires the appropriate Remove/spot-removal tool. These modes
-do not detect the active tool, inspect text fields, or change Lightroom modules.
+Selecting a mode only changes the Dial mapping. A subsequent short click in
+Remove mode sends Q to toggle Lightroom's Remove tool. Fine Tune acts on the
+selected adjustment. These modes do not detect the active tool or inspect text
+fields; selecting a mode does not change Lightroom modules.
+
+**Activate Remove before turning. With Remove inactive, turning may change photo star ratings.**
+This guidance also appears in Remove's pointer tooltips and accessibility help.
 
 On first use in Lightroom, the current general mode stays active until you
 explicitly select a mode. Later visits restore the last choice made in Lightroom,
 including a general mode if you selected one there. Leaving Lightroom restores
 your separately saved general mode. Both choices survive relaunches. Existing
 `mode` values (`scroll`, `playback`, `zoom`) remain compatible; the Lightroom
-choice is stored under `appMode.com.adobe.LightroomClassicCC7`.
+choice is stored under `appMode.com.adobe.LightroomClassicCC7`. Remove retains
+the existing `lightroomBrush` preference value, so saved selections remain compatible.
 
 The menu bar also exposes a contextual Lightroom submenu and reflects the
 current effective mode in its icon and tooltip. Switching foreground apps
@@ -166,9 +170,9 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The consistent-menu-clicks Release build, strict code-signature verification,
-503 recording-only behavior checks, and 352 native-view checks pass. The preview
-also compiles. The controller checks require access to native macOS services;
+The Remove-mode Release build, strict code-signature verification,
+504 recording-only behavior checks, and 364 native-view checks pass.
+The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure
 recovery, restoration after dismissal, haptic suppression, queued rotation, all six
@@ -176,11 +180,16 @@ modes, app-specific persistence, stale-report rejection, app-switch cancellation
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, and placement on displays with negative coordinates.
 
+Live Lightroom shortcut checks on a temporary virtual copy confirmed Q opens
+and closes Remove, ] increases its size from 14 to 15, and [ restores it to 14.
+The temporary copy was removed with Undo Create Virtual Copy afterward.
+These checks used keyboard input; physical Dial input remains unverified.
+
 Physical Dial validation and live focus/Space behavior remain unverified for
 this build. At each Wheel Sensitivity, verify one felt click per menu selection
 in both directions, wraparound, Lightroom group transitions, and normal sensitivity
 after dismissal. On Lightroom Classic 15.6, check next/previous navigation with Crop
-open, fine adjustment step size, Before view, brush size and Visualize Spots,
+open, fine adjustment step size, Before view, Remove size and Q toggling Remove,
 then leave and return to Lightroom to check mode restoration. Use disposable
 photos or virtual copies for that check. Also check the wheel over full-screen
 Lightroom, near display edges, and after disconnect/reconnect or sleep/wake.

@@ -65,6 +65,12 @@ for profile: AppProfile? in [nil, .lightroom] {
             let candidate = Mode.allCases[button.tag]
             check(button.accessibilityRole() == .radioButton, "Mode controls expose radio-button semantics")
             check(button.accessibilityLabel() == "\(candidate.title) mode", "Mode label is accessible")
+            if candidate == .lightroomBrush {
+                let guidance = "Activate Remove before turning. With Remove inactive, turning may change photo star ratings."
+                check(button.toolTip == guidance, "Remove exposes the rating guidance to pointer users")
+                check(button.accessibilityHelp()?.contains(guidance) == true,
+                      "Remove exposes the rating guidance to accessibility users")
+            }
             check((button.accessibilityValue() as? Int) == (candidate == mode ? 1 : 0), "Selected value is accessible")
             check(button.image != nil && button.isEnabled, "Icons are present and actionable after release")
             check(button.frame.width >= 44 && button.frame.height >= 44, "Icons have adequate pointer targets")

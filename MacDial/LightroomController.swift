@@ -26,7 +26,7 @@ final class LightroomController: Controller {
         switch mode {
         case .lightroomCrop: send(kVK_ANSI_R)
         case .lightroomFineTune: send(kVK_ANSI_Backslash)
-        case .lightroomBrush: send(kVK_ANSI_A)
+        case .lightroomBrush: send(kVK_ANSI_Q)
         default: break
         }
     }

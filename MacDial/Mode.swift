@@ -19,7 +19,7 @@ enum Mode: String, CaseIterable {
         case .zoom: return "Zoom"
         case .lightroomCrop: return "Crop & Browse"
         case .lightroomFineTune: return "Fine Tune"
-        case .lightroomBrush: return "Brush Size"
+        case .lightroomBrush: return "Remove"
         }
     }
 
@@ -38,7 +38,7 @@ enum Mode: String, CaseIterable {
         switch self {
         case .lightroomCrop: return "Turn: Previous / next"
         case .lightroomFineTune: return "Turn: Adjust − / +"
-        case .lightroomBrush: return "Turn: Brush size"
+        case .lightroomBrush: return "Turn: Remove size"
         default: return "Turn to choose"
         }
     }
@@ -47,9 +47,14 @@ enum Mode: String, CaseIterable {
         switch self {
         case .lightroomCrop: return "Click: Crop (R)"
         case .lightroomFineTune: return "Click: Before (\\)"
-        case .lightroomBrush: return "Click: Visualize spots"
+        case .lightroomBrush: return "Click: Remove (Q)"
         default: return "Click to select"
         }
+    }
+
+    var usageHelp: String? {
+        guard self == .lightroomBrush else { return nil }
+        return "Activate Remove before turning. With Remove inactive, turning may change photo star ratings."
     }
 
     // Preserve preferences written by earlier versions.

@@ -109,10 +109,47 @@ never send scroll, playback, zoom, or history actions; a confirmation report's r
 is also consumed. You can still select modes from the menu bar, and the chosen
 mode is remembered across launches using the existing preference values.
 
-The wheel uses SF Symbols, a dark translucent material, and a blue selection
-arc. Its native controls expose mode labels and selected state to accessibility.
+The wheel uses SF Symbols, native glass, and a blue selection arc. Choose
+**Radial Menu Appearance** beside **Radial Menu Starts At** in the menu bar:
+
+- **Automatic** (default): native Liquid Glass on macOS 26 or later; Classic on older macOS.
+- **Liquid Glass**: explicitly use native glass. This option is disabled on older macOS;
+  a saved Liquid Glass preference still falls back safely if used there.
+- **Classic**: the traditional frosted material.
+
+Appearance is saved independently of the selected Dial mode. Both renderers follow
+system light/dark appearance. Liquid Glass uses Apple's regular material without a
+custom tint or opacity override, allowing macOS to control its optical appearance.
+A subtle system-colored center backing protects instruction readability. Native
+SwiftUI glass is hosted behind the existing AppKit controls, using the same outline
+as the wheel and its app extensions. Shapes, targets, and navigation are unchanged.
+A 32-point transparent render margin surrounds the wheel inside both the glass
+host and floating window. This prevents the left app arc's native rim/shadow from
+being clipped. Screen-edge placement includes the margin; the visible wheel stays
+the same size and centered on the pointer when space allows.
+When native glass is active, the floating panel's additional window shadow is
+disabled so only the material supplies elevation. Classic and Reduce Transparency
+retain the normal panel shadow, including when settings change while open.
+Build with the macOS 26 SDK or later; the packaged app retains macOS 12 compatibility.
+
+Its native controls expose mode labels and selected state to accessibility.
 Reduce Transparency uses an opaque surface; Increase Contrast strengthens
-boundaries; Reduce Motion disables the opening fade.
+boundaries; Reduce Motion disables the opening fade and the 100 ms selection
+crossfade. Selection updates immediately, and confirmation cancels any crossfade.
+Accessibility setting changes are applied while the wheel is open.
+
+For repeatable native material checks, build `Tests/preview.sh --build-only`, then
+launch the preview executable with `--gallery --appearance light --backdrop busy`.
+The gallery shows the production general and contextual views on a shared background.
+Use `--appearance dark`, `--backdrop bright|dark|busy`, `--profile editwall`,
+`--style automatic|liquidGlass|classic`, `--reduce-transparency`, `--increase-contrast`,
+or `--reduce-motion` to inspect variations without changing system or app preferences.
+Use `--backdrop-image /path/to/image` to inspect glass over a local wallpaper.
+Without `--gallery`, the preview exercises the production picker/controller and its
+status menu. Use `--mode lightroomFineTune` with `--profile lightroom` to reproduce
+the left-arc clipping regression state. Offscreen rendering checks layout and controls; use the live preview
+to inspect the compositor-rendered glass. Display/presentation tests need a macOS
+session with access to a screen (a restricted sandbox can report zero displays).
 
 ### Editwall modes
 
@@ -144,7 +181,9 @@ live check.
 When **Lightroom Classic is the foreground app**, the wheel shows five equal
 inner wedges: Scroll (top), then Playback, Zoom, Undo/Redo, and Lightroom clockwise.
 Three selectable icons equally divide the Lightroom wedge's outer arc, which is
-66 points thick. The inner wheel remains 300 points; contextual bounds are 432×432.
+66 points thick. The inner wheel remains 300 points; the contextual shape uses a 432×432 coordinate
+area. Including its transparent effect margin, the floating window is 496×496
+points (364×364 for the general wheel).
 Lightroom’s installed app icon identifies its parent wedge, which is a visual
 group rather than another selection target.
 

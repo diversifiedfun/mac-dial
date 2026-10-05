@@ -47,8 +47,7 @@ func buttons(in parent: NSView) -> [NSButton] {
 }
 
 func update(_ state: ModePickerState) {
-    let diameter = RadialMenuLayout(profile: state.profile).diameter
-    window.setContentSize(NSSize(width: diameter, height: diameter))
+    window.setContentSize(RadialMenuLayout(profile: state.profile).presentationSize)
     view.update(state)
 }
 
@@ -82,7 +81,8 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
             check(button.frame.width >= 44 && button.frame.height >= 44, "Icons have adequate pointer targets")
             let position = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
             check(view.menuLayout.mode(at: position) == candidate, "Actual button frames match the shared geometry")
-            check((view.hitTest(position) as? NSButton)?.tag == button.tag, "Native hit testing reaches each icon through its group")
+            // NSView.hitTest takes superview coordinates, not wheel coordinates.
+            check((view.hitTest(view.convert(position, to: view.superview)) as? NSButton)?.tag == button.tag, "Native hit testing reaches each icon through its group")
         }
         let visibleLabels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
         check(visibleLabels.allSatisfy { $0.attributedStringValue.size().width <= $0.bounds.width },
@@ -140,7 +140,7 @@ view.onSelect = { selected.append($0) }
 for mode in Mode.generalModes {
     let location = RadialMenuGeometry.point(angle: RadialMenuGeometry.angle(for: mode) + 20, radius: 125)
     func mouse(_ type: NSEvent.EventType) -> NSEvent {
-        NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+        NSEvent.mouseEvent(with: type, location: view.convert(location, to: nil), modifierFlags: [], timestamp: 0,
                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                           clickCount: 1, pressure: 1)!
     }
@@ -158,7 +158,7 @@ var highlights: [Mode] = []
 view.onHighlight = { highlights.append($0) }
 view.onPressHighlight = { highlights.append($0) }
 func mouse(_ type: NSEvent.EventType, at location: NSPoint) -> NSEvent {
-    NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+    NSEvent.mouseEvent(with: type, location: view.convert(location, to: nil), modifierFlags: [], timestamp: 0,
                       windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                       clickCount: 1, pressure: 1)!
 }
@@ -172,7 +172,7 @@ check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips 
 check(highlights.count == AppProfile.lightroom.availableModes.count * 2, "The parent cannot be highlighted")
 let parent = view.menuLayout.appGroupSegment!
 let parentPoint = view.menuLayout.point(angle: parent.angle, radius: parent.iconRadius)
-check(!(view.hitTest(parentPoint) is NSButton), "The app icon is not an actionable control")
+check(!(view.hitTest(view.convert(parentPoint, to: view.superview)) is NSButton), "The app icon is not an actionable control")
 let selectedBefore = selected.count
 state.isArmed = false
 update(state)
@@ -193,7 +193,8 @@ view.onCancel = { didCancel = true }
 view.mouseDown(with: mouse(.leftMouseDown, at: view.menuLayout.point(angle: 0, radius: 180)))
 check(didCancel, "Empty space outside the partial outer ring cancels")
 update(ModePickerState(selectedMode: .zoom))
-check(view.bounds.width == 300 && buttons(in: view).count == Mode.generalModes.count,
+check(view.menuLayout.diameter == 300 && view.bounds.size == view.menuLayout.presentationSize
+      && buttons(in: view).count == Mode.generalModes.count,
       "Leaving app context restores the standard size and choices")
 for profile: AppProfile? in [nil, .lightroom, .editwall] {
     for mode in profile?.availableModes ?? Mode.generalModes {
@@ -234,6 +235,62 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
     }
 }
 
+// Check both renderers, system appearances and accessibility overrides with
+// the production controls. Shader/backdrop fidelity is checked in the live preview.
+for style in RadialMenuAppearance.allCases {
+    view.preferredAppearance = style
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        view.appearance = NSAppearance(named: appearance)
+        for profile: AppProfile? in [nil, .lightroom, .editwall] {
+            var chosen = ModePickerState(selectedMode: profile?.modes.first ?? .scrolling, profile: profile)
+            chosen.isArmed = true
+            update(chosen)
+            for opaque in [false, true] {
+                view.updateDisplayOptions(reduceTransparency: opaque, increasedContrast: opaque, reduceMotion: opaque)
+                check(view.isUsingLiquidGlass == (style.usesLiquidGlass() && !opaque),
+                      "Style and Reduce Transparency select exactly one appropriate renderer")
+                let prefix = "appearance-\(style.rawValue)-\(appearance.rawValue)-\(profile?.title ?? "general")-\(opaque ? "opaque" : "translucent")"
+                try render(prefix)
+                for control in buttons(in: view) {
+                    let center = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: view)
+                    check((view.hitTest(view.convert(center, to: view.superview)) as? NSButton) === control,
+                          "Glass and accessibility backgrounds never intercept native controls")
+                }
+                let labels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
+                check(labels.allSatisfy { $0.attributedStringValue.size().width <= $0.bounds.width },
+                      "Both appearances retain readable untruncated labels")
+                view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    check(labels.allSatisfy { label in
+                        guard let color = label.textColor?.usingColorSpace(.deviceRGB) else { return false }
+                        return appearance == .aqua ? color.redComponent < 0.4 : color.redComponent > 0.6
+                    }, "Instruction colors follow the view appearance, including after live changes")
+                }
+            }
+        }
+    }
+}
+view.appearance = nil
+view.preferredAppearance = .automatic
+view.updateDisplayOptions()
+
+// Native effects need real pixels outside the contour, especially at the
+// leftmost contextual arc. Test window-space conversion and empty-margin input.
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
+    var chosen = ModePickerState(selectedMode: .scrolling, profile: profile)
+    chosen.isArmed = true
+    update(chosen)
+    let effectEnvelope = view.menuLayout.outline.bounds.insetBy(dx: -24, dy: -24)
+    let windowEnvelope = view.convert(effectEnvelope, to: nil)
+    check(NSRect(origin: .zero, size: window.frame.size).contains(windowEnvelope),
+          "The floating render surface leaves room beyond every contour extremity")
+    check(view.convert(view.menuLayout.center, to: nil) == NSPoint(x: window.frame.width / 2, y: window.frame.height / 2),
+          "Padding keeps the original wheel center at the window center")
+    let margin = NSPoint(x: view.bounds.minX + 2, y: view.menuLayout.center.y)
+    didCancel = false
+    view.mouseDown(with: mouse(.leftMouseDown, at: margin))
+    check(didCancel && view.menuLayout.mode(at: margin) == nil, "Transparent margin cancels without selecting a mode")
+}
+
 // Exercise production presentation timing with a deterministic scheduler.
 final class PresentationClock {
     var time: TimeInterval = 0
@@ -257,7 +314,20 @@ for reducedMotion in [false, true] {
     let panel = menu.view.window!
     clock.advance(0.12)
     check(menu.isShowing && !panel.ignoresMouseEvents && panel.alphaValue == 1,
-          "Opening accepts input at full opacity")
+          "Opening accepts input at full opacity (showing=\(menu.isShowing), ignoresMouse=\(panel.ignoresMouseEvents), alpha=\(panel.alphaValue), screens=\(NSScreen.screens.count))")
+    for style in RadialMenuAppearance.allCases {
+        menu.view.preferredAppearance = style
+        menu.view.updateDisplayOptions(reduceTransparency: false, increasedContrast: false, reduceMotion: reducedMotion)
+        check(panel.hasShadow == !style.usesLiquidGlass(),
+              "The floating window supplies elevation only when the material does not")
+        menu.view.updateDisplayOptions(reduceTransparency: true, increasedContrast: true, reduceMotion: reducedMotion)
+        check(panel.hasShadow && menu.isShowing && !panel.ignoresMouseEvents,
+              "A live opaque-fallback transition restores elevation without interrupting input")
+    }
+    menu.view.preferredAppearance = .automatic
+    menu.view.updateDisplayOptions(reduceTransparency: false, increasedContrast: false, reduceMotion: reducedMotion)
+    check(panel.hasShadow == !RadialMenuAppearance.supportsLiquidGlass,
+          "Returning to glass removes the extra shadow again without reopening")
     menu.confirm(chosen)
     check(menu.isConfirming && panel.ignoresMouseEvents && !panel.isKeyWindow && cancelled == 0,
           "Confirmation releases focus and pointer input without cancelling")

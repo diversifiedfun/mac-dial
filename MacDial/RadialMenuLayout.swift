@@ -14,7 +14,13 @@ struct RadialMenuLayout {
     }
 
     let profile: AppProfile?
+    // Native glass extends beyond its contour. Reserve space inside both the
+    // hosting view and floating window so its rim/shadow cannot hit their edges.
+    static let effectPadding: CGFloat = 32
     var diameter: CGFloat { profile == nil ? 300 : 432 }
+    var presentationSize: NSSize {
+        NSSize(width: diameter + Self.effectPadding * 2, height: diameter + Self.effectPadding * 2)
+    }
     var center: NSPoint { NSPoint(x: diameter / 2, y: diameter / 2) }
     var coreFrame: NSRect { NSRect(x: center.x - 150, y: center.y - 150, width: 300, height: 300) }
     private var innerSweep: CGFloat { 360 / CGFloat(Mode.generalModes.count + (profile == nil ? 0 : 1)) }
@@ -82,11 +88,12 @@ struct RadialMenuLayout {
         return path
     }
 
-    func frame(around point: NSPoint, in screen: NSRect) -> NSRect {
+    func frame(around point: NSPoint, in screen: NSRect, padding: CGFloat = 0) -> NSRect {
         let available = screen.insetBy(dx: 10, dy: 10)
-        return NSRect(x: max(available.minX, min(point.x - diameter / 2, available.maxX - diameter)),
-                      y: max(available.minY, min(point.y - diameter / 2, available.maxY - diameter)),
-                      width: diameter, height: diameter)
+        let size = diameter + padding * 2
+        return NSRect(x: max(available.minX, min(point.x - size / 2, available.maxX - size)),
+                      y: max(available.minY, min(point.y - size / 2, available.maxY - size)),
+                      width: size, height: size)
     }
 }
 

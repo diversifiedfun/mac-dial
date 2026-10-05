@@ -32,7 +32,6 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
         panel.title = "Mac Dial modes"
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -41,6 +40,18 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
         panel.acceptsMouseMovedEvents = true
         panel.contentView = view
         panel.delegate = self
+        view.onMaterialChanged = { [weak self] nativeGlass in
+            self?.updateWindowShadow(nativeGlass: nativeGlass)
+        }
+        updateWindowShadow(nativeGlass: view.isUsingLiquidGlass)
+    }
+
+    private func updateWindowShadow(nativeGlass: Bool) {
+        // Liquid Glass renders its own elevation around the custom contour.
+        // Avoid a second window-server silhouette around that same contour.
+        // Keep the normal panel shadow for Classic and the opaque fallback.
+        panel.hasShadow = !nativeGlass
+        panel.invalidateShadow()
     }
 
     deinit {
@@ -59,7 +70,8 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
         }
         previousKeyWindow = NSApp.keyWindow
         isShowing = true
-        panel.setFrame(view.menuLayout.frame(around: pointer, in: screen.visibleFrame), display: true)
+        panel.setFrame(view.menuLayout.frame(around: pointer, in: screen.visibleFrame,
+                                             padding: RadialMenuLayout.effectPadding), display: true)
         let animate = !reduceMotion()
         panel.ignoresMouseEvents = false
         panel.alphaValue = animate ? 0 : 1
@@ -105,6 +117,7 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
 
     func dismiss() {
         cancelAnimation()
+        view.finishSelectionAnimation()
         guard isShowing else { return }
         isShowing = false
         isConfirming = false

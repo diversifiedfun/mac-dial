@@ -92,6 +92,13 @@ extension NSMenu {
             items.radialMenuStartPosition.submenu?.addItem(option)
         }
         self.addItem(items.radialMenuStartPosition)
+
+        items.radialMenuAppearance.submenu = NSMenu()
+        items.radialMenuAppearance.submenu?.autoenablesItems = false
+        for option in items.radialMenuAppearanceOptions {
+            items.radialMenuAppearance.submenu?.addItem(option)
+        }
+        self.addItem(items.radialMenuAppearance)
         
         items.scrollDirection.submenu = NSMenu.init()
         for scrollDirectionOption in items.scrollDirectionOptions {
@@ -158,6 +165,10 @@ class StatusBarController
             MenuOptionItem(title: "\($0.rawValue) ms", option: $0)
         }
         let radialMenuStartPosition = NSMenuItem(title: "Radial Menu Starts At")
+        let radialMenuAppearance = NSMenuItem(title: "Radial Menu Appearance")
+        let radialMenuAppearanceOptions = RadialMenuAppearance.allCases.map {
+            MenuOptionItem(title: $0.title, option: $0)
+        }
         let radialMenuStartPositionOptions = [
             MenuOptionItem<RadialMenuStartPosition>(title: "Last Selected", option: .lastSelected),
             MenuOptionItem<RadialMenuStartPosition>(title: "First Item", option: .firstItem)
@@ -215,6 +226,17 @@ class StatusBarController
         set {
             input.radialMenuStartPosition = newValue
             for option in menuItems.radialMenuStartPositionOptions {
+                option.selected = option.option == newValue
+            }
+            newValue.save()
+        }
+    }
+
+    var radialMenuAppearance: RadialMenuAppearance {
+        get { RadialMenuAppearance.load() }
+        set {
+            radialMenu.view.preferredAppearance = newValue
+            for option in menuItems.radialMenuAppearanceOptions {
                 option.selected = option.option == newValue
             }
             newValue.save()
@@ -315,6 +337,20 @@ class StatusBarController
             }
         }
         radialMenuStartPosition = radialMenuStartPosition // restore the opening choice and checkmark
+
+        for option in menuItems.radialMenuAppearanceOptions {
+            option.target = self
+            option.action = #selector(setRadialMenuAppearance(sender:))
+            option.isEnabled = option.option != .liquidGlass || RadialMenuAppearance.supportsLiquidGlass
+            let help = option.option == .liquidGlass
+                ? "Requires macOS 26 or later. Follows system appearance and accessibility settings."
+                : option.option == .automatic
+                    ? "Use native Liquid Glass on macOS 26 or later, and Classic on older systems."
+                    : "Use the traditional frosted wheel, following system appearance."
+            option.toolTip = help
+            option.setAccessibilityHelp(help)
+        }
+        radialMenuAppearance = radialMenuAppearance
         
         for option in menuItems.scrollDirectionOptions {
             option.target = self
@@ -541,6 +577,12 @@ class StatusBarController
     @objc func setRadialMenuStartPosition(sender: AnyObject) {
         let item = sender as! MenuOptionItem<RadialMenuStartPosition>
         radialMenuStartPosition = item.option
+    }
+
+    @objc func setRadialMenuAppearance(sender: AnyObject) {
+        let item = sender as! MenuOptionItem<RadialMenuAppearance>
+        cancelPendingInput()
+        radialMenuAppearance = item.option
     }
     
     @objc func setHaptics(sender: AnyObject) {

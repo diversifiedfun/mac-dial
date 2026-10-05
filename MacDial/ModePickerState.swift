@@ -1,5 +1,34 @@
 import Foundation
 
+enum RadialMenuAppearance: String, CaseIterable {
+    case automatic, liquidGlass, classic
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .liquidGlass: return "Liquid Glass"
+        case .classic: return "Classic"
+        }
+    }
+
+    static var supportsLiquidGlass: Bool {
+        if #available(macOS 26.0, *) { return true }
+        return false
+    }
+
+    func usesLiquidGlass(isSupported: Bool = Self.supportsLiquidGlass) -> Bool {
+        isSupported && self != .classic
+    }
+
+    static func load(from defaults: UserDefaults = .standard) -> Self {
+        Self(rawValue: defaults.string(forKey: "radialMenuAppearance") ?? "") ?? .automatic
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: "radialMenuAppearance")
+    }
+}
+
 enum RadialMenuStartPosition: String, CaseIterable {
     case lastSelected
     case firstItem

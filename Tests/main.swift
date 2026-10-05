@@ -1479,4 +1479,40 @@ do {
     if !responsive { _ = queried.wait(timeout: .now() + 2) }
     check(responsive && accepted, "UI generation and feedback queries do not wait for an in-flight HID write")
 }
+// Appearance persistence and fallback must not alter other dial preferences.
+do {
+    let suite = "MacDial.AppearanceTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set("zoom", forKey: "mode")
+    check(RadialMenuAppearance.load(from: defaults) == .automatic, "New installs use Automatic appearance")
+    for appearance in RadialMenuAppearance.allCases {
+        appearance.save(to: defaults)
+        check(RadialMenuAppearance.load(from: UserDefaults(suiteName: suite)!) == appearance,
+              "Appearance survives defaults reload")
+        check(!appearance.usesLiquidGlass(isSupported: false), "All preferences fall back on older systems")
+        check(appearance.usesLiquidGlass(isSupported: true) == (appearance != .classic),
+              "Only Automatic and Liquid Glass use the supported native material")
+    }
+    defaults.set("unknown", forKey: "radialMenuAppearance")
+    check(RadialMenuAppearance.load(from: defaults) == .automatic, "Unknown appearance safely defaults to Automatic")
+    check(defaults.string(forKey: "mode") == "zoom", "Appearance does not change saved dial mode")
+}
+// Screen placement includes the glass/shadow render margin on every edge.
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
+    let layout = RadialMenuLayout(profile: profile)
+    for screen in [NSRect(x: 0, y: 25, width: 1440, height: 875),
+                   NSRect(x: -1920, y: -200, width: 1920, height: 1080)] {
+        for point in [screen.origin, NSPoint(x: screen.minX, y: screen.maxY),
+                      NSPoint(x: screen.maxX, y: screen.minY), NSPoint(x: screen.maxX, y: screen.maxY),
+                      NSPoint(x: screen.midX, y: screen.midY)] {
+            let frame = layout.frame(around: point, in: screen, padding: RadialMenuLayout.effectPadding)
+            check(screen.insetBy(dx: 10, dy: 10).contains(frame), "The complete padded window stays on the pointer display")
+            check(frame.size == layout.presentationSize, "Clamping never scales or trims the wheel")
+        }
+        let center = NSPoint(x: screen.midX, y: screen.midY)
+        let frame = layout.frame(around: center, in: screen, padding: RadialMenuLayout.effectPadding)
+        check(frame.midX == center.x && frame.midY == center.y, "An unconstrained wheel remains centered on the pointer")
+    }
+}
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

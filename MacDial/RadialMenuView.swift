@@ -1,4 +1,41 @@
 import AppKit
+import SwiftUI
+
+// SwiftUI's public Shape API gives the glass renderer the actual contour,
+// including app-specific extensions, rather than clipping a rounded rectangle.
+@available(macOS 26.0, *)
+private struct RadialGlassShape: Shape {
+    let layout: RadialMenuLayout
+
+    func path(in rect: CGRect) -> Path {
+        var transform = CGAffineTransform(a: rect.width / layout.diameter, b: 0,
+                                         c: 0, d: -rect.height / layout.diameter,
+                                         tx: rect.minX, ty: rect.maxY)
+        return Path(layout.outline.compatibleCGPath.copy(using: &transform)!)
+    }
+}
+
+@available(macOS 26.0, *)
+private struct RadialGlassBackground: View {
+    let layout: RadialMenuLayout
+
+    var body: some View {
+        Color.clear
+            .frame(width: layout.diameter, height: layout.diameter)
+            // Leave tint, appearance and optical intensity to macOS.
+            .glassEffect(.regular, in: RadialGlassShape(layout: layout))
+            // Padding must be outside the effect, not inside its shape: this
+            // preserves the wheel radius while expanding the render surface.
+            .padding(RadialMenuLayout.effectPadding)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+@available(macOS 26.0, *)
+private final class RadialGlassHost: NSHostingView<RadialGlassBackground> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
 
 private final class ModeIconButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -23,9 +60,16 @@ final class RadialMenuView: NSView {
     var onMove: ((Int) -> Void)?
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onMaterialChanged: ((Bool) -> Void)?
 
     private let material = NSVisualEffectView()
+    private var glass: NSView?
     private let surface = RadialSurfaceView()
+    var preferredAppearance: RadialMenuAppearance = .automatic {
+        didSet { updateDisplayOptions() }
+    }
+    private(set) var isUsingLiquidGlass = false
+    private var reduceMotion = false
     private let titleLabel = NSTextField(labelWithString: "Scroll")
     private let turnLabel = NSTextField(labelWithString: "Turn to choose")
     private let clickLabel = NSTextField(labelWithString: "Click to select")
@@ -47,7 +91,6 @@ final class RadialMenuView: NSView {
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
-        appearance = NSAppearance(named: .vibrantDark)
         setAccessibilityElement(false)
         setAccessibilityLabel("Mac Dial modes")
 
@@ -70,12 +113,12 @@ final class RadialMenuView: NSView {
             label.alignment = .center
             label.isSelectable = false
             label.font = .systemFont(ofSize: 11)
-            label.textColor = NSColor.white.withAlphaComponent(0.72)
+            label.textColor = .labelColor
             addSubview(label)
         }
-        titleLabel.textColor = .white
+        titleLabel.textColor = .labelColor
         confirmationIcon.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
-        confirmationIcon.contentTintColor = .white
+        confirmationIcon.contentTintColor = .labelColor
         confirmationIcon.setAccessibilityElement(false)
         confirmationIcon.isHidden = true
         addSubview(confirmationIcon)
@@ -99,11 +142,15 @@ final class RadialMenuView: NSView {
         mouseDownMode = nil
         buttons.values.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
-        setFrameSize(NSSize(width: menuLayout.diameter, height: menuLayout.diameter))
-        material.frame = bounds
-        surface.frame = bounds
+        setFrameSize(menuLayout.presentationSize)
+        // Keep wheel-space coordinates unchanged. The negative bounds origin
+        // provides a transparent margin without shifting icons or hit targets.
+        setBoundsOrigin(NSPoint(x: -RadialMenuLayout.effectPadding, y: -RadialMenuLayout.effectPadding))
+        let wheelFrame = NSRect(x: 0, y: 0, width: menuLayout.diameter, height: menuLayout.diameter)
+        material.frame = wheelFrame
+        surface.frame = wheelFrame
         surface.menuLayout = menuLayout
-        appGroup.frame = bounds
+        appGroup.frame = wheelFrame
         appGroup.isHidden = menuLayout.profile == nil
         appGroup.setAccessibilityLabel("\(menuLayout.profile?.title ?? "App") modes")
         appGroup.setAccessibilityHelp(menuLayout.profile.map { "\($0.modes.count) modes available while \($0.title) is active" })
@@ -120,7 +167,7 @@ final class RadialMenuView: NSView {
             button.imageScaling = .scaleProportionallyDown
             button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 28, weight: .regular))
-            button.contentTintColor = .white
+            button.contentTintColor = .labelColor
             (button.cell as? NSButtonCell)?.imageDimsWhenDisabled = false
             button.target = self
             button.action = #selector(selectIcon(_:))
@@ -141,6 +188,32 @@ final class RadialMenuView: NSView {
         let mask = CAShapeLayer()
         mask.path = menuLayout.outline.compatibleCGPath
         material.layer?.mask = mask
+        updateGlassLayout()
+    }
+
+    private func updateGlassLayout() {
+        if #available(macOS 26.0, *), let host = glass as? RadialGlassHost {
+            host.rootView = RadialGlassBackground(layout: menuLayout)
+            host.frame = bounds
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateMaterialAppearance()
+        surface.needsDisplay = true
+    }
+
+    private func updateMaterialAppearance() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        material.material = dark ? .hudWindow : .popover
+        // Applying alpha resolves a semantic NSColor. Resolve under this view's
+        // current appearance, and refresh when it changes, not at initialization.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            for label in [turnLabel, clickLabel, contextLabel, gestureLabel] {
+                label.textColor = NSColor.labelColor.withAlphaComponent(0.82)
+            }
+        }
     }
 
     private func applicationIcon(for profile: AppProfile) -> NSImage? {
@@ -176,12 +249,14 @@ final class RadialMenuView: NSView {
         appIcon.alphaValue = 1
         turnLabel.isHidden = false
         clickLabel.isHidden = false
-        if menuLayout.profile != state.profile {
+        let profileChanged = menuLayout.profile != state.profile
+        if profileChanged {
             menuLayout = RadialMenuLayout(profile: state.profile)
             rebuildControls()
         }
         let changed = surface.selectedMode != state.selectedMode
-        surface.selectedMode = state.selectedMode
+        surface.select(state.selectedMode, animated: !profileChanged && !reduceMotion
+                       && isArmed && window?.isVisible == true)
         isArmed = state.isArmed
         titleLabel.stringValue = state.selectedMode.title
         let c = menuLayout.center
@@ -208,6 +283,7 @@ final class RadialMenuView: NSView {
             clickLabel.stringValue = state.isArmed ? "Press to select" : "Esc to cancel"
         }
         for (mode, button) in buttons {
+            button.contentTintColor = .labelColor
             button.alphaValue = mode == state.selectedMode ? 1 : 0.78
             button.setAccessibilityValue(mode == state.selectedMode ? 1 : 0)
             button.isEnabled = state.isArmed
@@ -217,11 +293,13 @@ final class RadialMenuView: NSView {
 
     func showConfirmation(_ state: ModePickerState) {
         update(state)
+        finishSelectionAnimation()
         isConfirming = true
         mouseDownMode = nil
         isArmed = false
         surface.isConfirming = true
         buttons.values.forEach { $0.isEnabled = false }
+        buttons[state.selectedMode]?.contentTintColor = .white
         let c = menuLayout.center
         titleLabel.frame.origin.y = c.y + 2
         contextLabel.isHidden = true
@@ -248,11 +326,30 @@ final class RadialMenuView: NSView {
         }
     }
 
+    func finishSelectionAnimation() { surface.finishSelectionAnimation() }
+
     func updateDisplayOptions(reduceTransparency: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
-                              increasedContrast: Bool = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast) {
-        material.isHidden = reduceTransparency
+                              increasedContrast: Bool = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+                              reduceMotion: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
+        self.reduceMotion = reduceMotion
+        if reduceMotion { finishSelectionAnimation() }
+        let previouslyUsingGlass = isUsingLiquidGlass
+        isUsingLiquidGlass = preferredAppearance.usesLiquidGlass() && !reduceTransparency
+        if #available(macOS 26.0, *), isUsingLiquidGlass, glass == nil {
+            let host = RadialGlassHost(rootView: RadialGlassBackground(layout: menuLayout))
+            host.sizingOptions = []
+            host.setAccessibilityElement(false)
+            glass = host
+            addSubview(host, positioned: .below, relativeTo: surface)
+            updateGlassLayout()
+        }
+        glass?.isHidden = !isUsingLiquidGlass
+        material.isHidden = reduceTransparency || isUsingLiquidGlass
+        surface.usesGlass = isUsingLiquidGlass
         surface.reduceTransparency = reduceTransparency
         surface.increasedContrast = increasedContrast
+        updateMaterialAppearance()
+        if previouslyUsingGlass != isUsingLiquidGlass { onMaterialChanged?(isUsingLiquidGlass) }
     }
 
     override func updateTrackingAreas() {
@@ -302,7 +399,39 @@ final class RadialMenuView: NSView {
 
 private final class RadialSurfaceView: NSView {
     var menuLayout = RadialMenuLayout(profile: nil) { didSet { needsDisplay = true } }
-    var selectedMode: Mode = .scrolling { didSet { needsDisplay = true } }
+    private(set) var selectedMode: Mode = .scrolling
+    private var selectionWeights: [Mode: CGFloat] = [.scrolling: 1]
+    private var selectionTimer: Timer?
+    var usesGlass = false { didSet { needsDisplay = true } }
+
+    deinit { selectionTimer?.invalidate() }
+
+    func select(_ mode: Mode, animated: Bool) {
+        guard mode != selectedMode else { return }
+        let initialWeights = selectionWeights
+        selectedMode = mode
+        selectionTimer?.invalidate()
+        guard animated else { finishSelectionAnimation(); return }
+        let start = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let t = min(1, (ProcessInfo.processInfo.systemUptime - start) / 0.1)
+            let progress = CGFloat(t * t * (3 - 2 * t))
+            self.selectionWeights = initialWeights.mapValues { $0 * (1 - progress) }
+            self.selectionWeights[mode, default: 0] += progress
+            self.needsDisplay = true
+            if t >= 1 { self.finishSelectionAnimation() }
+        }
+        selectionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func finishSelectionAnimation() {
+        selectionTimer?.invalidate()
+        selectionTimer = nil
+        selectionWeights = [selectedMode: 1]
+        needsDisplay = true
+    }
     var increasedContrast = false { didSet { needsDisplay = true } }
     var reduceTransparency = false { didSet { needsDisplay = true } }
     var isConfirming = false { didSet { needsDisplay = true } }
@@ -315,11 +444,19 @@ private final class RadialSurfaceView: NSView {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         layout.outline.addClip()
-        (reduceTransparency ? NSColor(calibratedWhite: 0.12, alpha: 1) : NSColor.black.withAlphaComponent(0.24)).setFill()
-        layout.outline.fill()
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let foreground = NSColor.labelColor
+        if reduceTransparency {
+            NSColor.windowBackgroundColor.setFill()
+            layout.outline.fill()
+        } else if !usesGlass {
+            (dark ? NSColor.black : NSColor.white).withAlphaComponent(0.24).setFill()
+            layout.outline.fill()
+        }
         for segment in layout.segments {
-            if segment.mode == selectedMode {
-                (isConfirming ? NSColor.systemBlue : NSColor.white.withAlphaComponent(increasedContrast ? 0.24 : 0.10)).setFill()
+            if let mode = segment.mode, let weight = selectionWeights[mode], weight > 0 {
+                (isConfirming ? NSColor.systemBlue.withAlphaComponent(weight)
+                 : foreground.withAlphaComponent((increasedContrast ? 0.24 : 0.10) * weight)).setFill()
                 layout.path(for: segment).fill()
             } else if segment.mode == nil && layout.profile?.modes.contains(selectedMode) == true {
                 NSColor.systemBlue.withAlphaComponent((increasedContrast ? 0.24 : 0.12) * decorationOpacity).setFill()
@@ -327,12 +464,12 @@ private final class RadialSurfaceView: NSView {
             }
         }
 
-        NSColor.white.withAlphaComponent(increasedContrast ? 0.45 : 0.10).setStroke()
+        foreground.withAlphaComponent(increasedContrast ? 0.55 : 0.10).setStroke()
         if layout.profile == nil {
             let border = NSBezierPath(ovalIn: layout.coreFrame.insetBy(dx: 0.5, dy: 0.5))
             border.lineWidth = 1
             border.stroke()
-            NSColor.white.withAlphaComponent((increasedContrast ? 0.45 : 0.10) * decorationOpacity).setStroke()
+            foreground.withAlphaComponent((increasedContrast ? 0.55 : 0.10) * decorationOpacity).setStroke()
             for segment in layout.segments {
                 let angle = segment.angle + segment.sweep / 2
                 let line = NSBezierPath()
@@ -346,7 +483,7 @@ private final class RadialSurfaceView: NSView {
             outline.lineWidth = 1
             outline.stroke()
             for segment in layout.segments {
-                NSColor.white.withAlphaComponent((increasedContrast ? 0.45 : 0.10)
+                foreground.withAlphaComponent((increasedContrast ? 0.55 : 0.10)
                     * (segment.mode == selectedMode ? 1 : decorationOpacity)).setStroke()
                 let path = layout.path(for: segment)
                 path.lineWidth = 0.5
@@ -354,20 +491,22 @@ private final class RadialSurfaceView: NSView {
             }
         }
         let middle = NSBezierPath(ovalIn: NSRect(x: layout.center.x - 72, y: layout.center.y - 72, width: 144, height: 144))
-        NSColor.white.withAlphaComponent(increasedContrast ? 0.45 : 0.10).setStroke()
-        NSColor.black.withAlphaComponent(0.20).setFill()
+        foreground.withAlphaComponent(increasedContrast ? 0.55 : 0.10).setStroke()
+        (usesGlass ? NSColor.windowBackgroundColor.withAlphaComponent(0.28)
+         : (dark ? NSColor.black : NSColor.white).withAlphaComponent(0.20)).setFill()
         middle.fill()
         middle.lineWidth = 0.5
         middle.stroke()
 
-        if let segment = layout.segment(for: selectedMode) {
+        for (mode, weight) in selectionWeights where weight > 0 {
+            guard let segment = layout.segment(for: mode) else { continue }
             let arc = NSBezierPath()
             arc.appendArc(withCenter: layout.center, radius: segment.outerRadius - 2.5,
                           startAngle: segment.angle + segment.sweep / 2 - 1.5,
                           endAngle: segment.angle - segment.sweep / 2 + 1.5, clockwise: true)
             arc.lineWidth = 4
             arc.lineCapStyle = .round
-            NSColor.systemBlue.setStroke()
+            NSColor.systemBlue.withAlphaComponent(weight).setStroke()
             arc.stroke()
         }
     }

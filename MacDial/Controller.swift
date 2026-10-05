@@ -3,6 +3,9 @@ import Foundation
 
 protocol Controller: AnyObject
 {
+    // Physical press notification only; actions still wait for a short release.
+    func onPressBegan()
+
     func onDown()
     
     func onUp()
@@ -14,5 +17,6 @@ protocol Controller: AnyObject
 }
 
 extension Controller {
+    func onPressBegan() {}
     func onCancel() {}
 }

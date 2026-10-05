@@ -72,7 +72,7 @@ for profile: AppProfile? in [nil, .lightroom] {
                       "Remove exposes the rating guidance to accessibility users")
             }
             if candidate == .undoRedo {
-                let guidance = "Turn left to undo; turn right to redo, one step per tick. Click to undo once. Requires Command+Z and Shift+Command+Z support in the focused app."
+                let guidance = "Turn left to undo; turn right to redo, one step per tick. Click to undo once; double-click to redo once. Single clicks wait for the macOS double-click interval. Requires Command+Z and Shift+Command+Z support in the focused app."
                 check(button.toolTip == guidance, "Undo/Redo exposes its actions and shortcut requirements to pointer users")
                 check(button.accessibilityHelp()?.contains(guidance) == true,
                       "Undo/Redo exposes its actions and shortcut requirements to accessibility users")

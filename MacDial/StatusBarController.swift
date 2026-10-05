@@ -309,6 +309,7 @@ class StatusBarController
             self?.updateConnectionStatus()
         }
         
+        input.onPressBegan = { [weak self] in self?.currentController.onPressBegan() }
         input.onShortPress = { [weak self] in
             guard let self = self, !self.refreshForegroundApplication() else { return }
             let controller = self.currentController

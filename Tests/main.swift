@@ -587,7 +587,10 @@ check(keys.count == 8, "Empty rotations must not generate keys")
 var historyKeys: [CGEvent] = []
 var historyPIDs: [pid_t] = []
 var historyForeground: pid_t? = 42
-let undoRedo = UndoRedoController(targetProcess: { historyForeground }, post: { event, pid in
+let historyClock = Clock()
+let undoRedo = UndoRedoController(now: { historyClock.time }, doubleClickInterval: { 0.5 },
+                                 schedule: { historyClock.schedule($0, $1) },
+                                 targetProcess: { historyForeground }, post: { event, pid in
     historyKeys.append(event)
     historyPIDs.append(pid)
 })
@@ -609,8 +612,10 @@ for direction in [1, -1] {
 }
 historyKeys.removeAll()
 undoRedo.onUp()
+check(historyKeys.isEmpty, "Single-click undo waits for the double-click window")
+historyClock.advance(0.5)
 check(historyKeys.map(\.type) == [.keyDown, .keyUp] && historyKeys.allSatisfy { $0.flags == .maskCommand },
-      "Short release performs exactly one undo")
+      "Single-click timeout performs exactly one undo")
 check(historyPIDs.allSatisfy { $0 == 42 }, "History shortcuts target the foreground process")
 for count in [0, -1] {
     undoRedo.onRotate(.Clockwise(count), 1)
@@ -643,13 +648,16 @@ for rotation: Dial.Rotation in [.Clockwise(5), .CounterClockwise(5)] {
 do {
     var lookups = 0
     var events: [CGEvent] = []
-    let controller = UndoRedoController(targetProcess: {
+    let clock = Clock()
+    let controller = UndoRedoController(now: { clock.time }, doubleClickInterval: { 0.5 },
+                                       schedule: { clock.schedule($0, $1) }, targetProcess: {
         lookups += 1
         return lookups == 1 ? 42 : 84
     }, post: { event, _ in events.append(event) })
     controller.onRotate(.CounterClockwise(5), 1)
     check(events.isEmpty, "A focus change before the first pair prevents the entire batch")
     controller.onUp()
+    clock.advance(0.5)
     check(events.count == 2, "A new input can target the newly focused application")
 }
 
@@ -661,6 +669,7 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     mouse.removeAll(); keys.removeAll(); media.removeAll(); historyKeys.removeAll()
     let h = Harness()
     h.mode = mode
+    h.input.onPressBegan = { controller.onPressBegan() }
     h.input.onShortPress = { controller.onDown(); controller.onUp() }
     h.input.onCancelAction = { controller.onCancel() }
     h.input.onRotation = { controller.onRotate($0, $1) }
@@ -678,8 +687,11 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     case .scrolling: check(mouse.map(\.type) == [.leftMouseDown, .leftMouseUp], "Scroll emits one balanced click at short release")
     case .playback: check(media == [NX_KEYTYPE_PLAY], "Playback still plays/pauses on a short click")
     case .zoom: check(keys.count == 2, "Zoom still resets on a short click")
-    case .undoRedo: check(historyKeys.count == 2 && historyKeys.allSatisfy { $0.flags == .maskCommand },
-                         "Undo/Redo undoes once on short release")
+    case .undoRedo:
+        check(historyKeys.isEmpty, "Undo/Redo defers the short click while checking for a double-click")
+        historyClock.advance(0.5)
+        check(historyKeys.count == 2 && historyKeys.allSatisfy { $0.flags == .maskCommand },
+              "Undo/Redo undoes once after its click window")
     default: preconditionFailure("General controllers only")
     }
 }
@@ -690,9 +702,13 @@ for profile: AppProfile? in [nil, .lightroom] {
         h.mode = .undoRedo
         h.profile = profile
         h.input.menuPressDuration = duration
-        h.input.onShortPress = { undoRedo.onDown(); undoRedo.onUp() }
-        h.input.onCancelAction = { undoRedo.onCancel() }
-        h.input.onRotation = { undoRedo.onRotate($0, $1) }
+        let controller = UndoRedoController(now: { h.clock.time }, doubleClickInterval: { 0.5 },
+                                           schedule: { h.clock.schedule($0, $1) },
+                                           targetProcess: { 42 }, post: { event, _ in historyKeys.append(event) })
+        h.input.onPressBegan = { controller.onPressBegan() }
+        h.input.onShortPress = { controller.onDown(); controller.onUp() }
+        h.input.onCancelAction = { controller.onCancel() }
+        h.input.onRotation = { controller.onRotate($0, $1) }
         h.open()
         h.input.highlight(.undoRedo)
         h.report(.pressed)
@@ -710,9 +726,141 @@ for profile: AppProfile? in [nil, .lightroom] {
         h.report(.released, .CounterClockwise(5))
         check(historyKeys.isEmpty, "Cancelling an in-progress short press consumes its release and rotation")
         h.click()
+        h.clock.advance(0.5)
         check(historyKeys.count == 2, "A fresh short click undoes once after cancellation")
     }
 }
+// Use the actual physical-press router and a deterministic clock for exclusive
+// single/double clicks; no event is posted to the desktop.
+final class HistoryClickHarness {
+    let routing = Harness()
+    var foreground: pid_t? = 42
+    var interval: TimeInterval = 0.5
+    var events: [CGEvent] = []
+    lazy var controller = UndoRedoController(
+        now: { [unowned self] in self.routing.clock.time },
+        doubleClickInterval: { [unowned self] in self.interval },
+        schedule: { [unowned self] in self.routing.clock.schedule($0, $1) },
+        targetProcess: { [unowned self] in self.foreground },
+        post: { [unowned self] event, _ in self.events.append(event) })
+
+    init() {
+        routing.mode = .undoRedo
+        routing.input.onPressBegan = { [unowned self] in self.controller.onPressBegan() }
+        routing.input.onShortPress = { [unowned self] in self.controller.onDown(); self.controller.onUp() }
+        routing.input.onCancelAction = { [unowned self] in self.controller.onCancel() }
+        routing.input.onRotation = { [unowned self] in self.controller.onRotate($0, $1) }
+    }
+
+    func checkActions(_ flags: [CGEventFlags], _ message: String) {
+        check(events.count == flags.count * 2 && events.enumerated().allSatisfy { index, event in
+            event.flags == flags[index / 2] && event.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_ANSI_Z)
+                && event.type == (index % 2 == 0 ? .keyDown : .keyUp)
+        }, message)
+    }
+}
+
+for interval: TimeInterval in [0.25, 0.5, 0.8] {
+    let c = HistoryClickHarness()
+    c.interval = interval
+    c.routing.click()
+    c.checkActions([], "First click sends no undo while a double-click is possible")
+    c.routing.clock.advance(interval / 2)
+    c.routing.click()
+    c.checkActions([[.maskCommand, .maskShift]], "Double-click sends exactly one redo and no preliminary undo")
+    c.routing.clock.advance(interval + 1)
+    c.checkActions([[.maskCommand, .maskShift]], "Double-click leaves no delayed undo behind")
+    c.routing.click()
+    c.checkActions([[.maskCommand, .maskShift]], "Third click starts a new single-click window")
+    c.routing.clock.advance(interval)
+    c.checkActions([[.maskCommand, .maskShift], .maskCommand], "Third click becomes one undo after the configured interval")
+}
+
+do {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.routing.clock.advance(0.51)
+    c.routing.click()
+    c.routing.clock.advance(0.51)
+    c.checkActions([.maskCommand, .maskCommand], "Clicks outside the double-click window each undo once")
+}
+do {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.routing.clock.time += 0.51 // The first timer is overdue on a busy main queue.
+    c.routing.click()
+    c.checkActions([.maskCommand], "An overdue single click is resolved before a late second click")
+    c.routing.clock.advance(0.51)
+    c.checkActions([.maskCommand, .maskCommand], "Late second click cannot become redo because its timer was delayed")
+}
+do {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.routing.clock.advance(0.4)
+    c.routing.report(.pressed)
+    c.routing.clock.advance(0.15)
+    c.checkActions([], "A second press suspends undo while waiting to distinguish a click from a hold")
+    c.routing.report(.released)
+    c.checkActions([[.maskCommand, .maskShift]], "A second short press begun within the window redoes even when released after it")
+}
+for duration in MenuPressDuration.allCases {
+    let c = HistoryClickHarness()
+    c.routing.input.menuPressDuration = duration
+    c.routing.click()
+    c.routing.clock.advance(0.1)
+    c.routing.report(.pressed)
+    c.routing.clock.advance(duration.seconds)
+    c.routing.report(.released)
+    c.routing.clock.advance(1)
+    check(c.routing.input.picker != nil, "A hold following a single click still opens the picker")
+    c.checkActions([], "Click followed by hold cancels pending undo at every menu press duration")
+    c.routing.input.cancel()
+    c.routing.click()
+    c.routing.clock.advance(0.51)
+    c.checkActions([.maskCommand], "Clicking works normally after a cancelled click-and-hold")
+}
+do {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    let stale = c.routing.clock.pending.last!.1
+    c.routing.input.cancel() // Shared by mode changes, disconnect, sleep and app changes.
+    c.routing.clock.advance(1)
+    c.checkActions([], "Lifecycle cancellation drops a pending undo")
+    c.routing.click()
+    stale.perform()
+    c.checkActions([], "A stale callback cannot resolve a new single click")
+    c.routing.clock.advance(0.51)
+    c.checkActions([.maskCommand], "A fresh click survives a stale cancelled callback")
+}
+for foreground: pid_t? in [84, nil] {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.foreground = foreground
+    c.routing.clock.advance(0.51)
+    c.checkActions([], "Delayed undo cannot be redirected when foreground focus changes or disappears")
+}
+for rotation: Dial.Rotation in [.Clockwise(2), .CounterClockwise(2)] {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.routing.report(.released, rotation)
+    let flags: CGEventFlags
+    switch rotation {
+    case .Clockwise: flags = [.maskCommand, .maskShift]
+    case .CounterClockwise: flags = .maskCommand
+    }
+    c.checkActions([flags, flags], "Rotation is immediate and takes over from a pending click")
+    c.routing.clock.advance(1)
+    c.checkActions([flags, flags], "Rotation cannot be followed by a leftover delayed undo")
+}
+do {
+    let c = HistoryClickHarness()
+    c.routing.click()
+    c.routing.report(.released, .Clockwise(0))
+    c.routing.report(.released, .CounterClockwise(-1))
+    c.routing.clock.advance(0.51)
+    c.checkActions([.maskCommand], "Empty rotations do not discard a real pending click")
+}
+
 playback.onCancel()
 media.removeAll()
 playback.onUp()

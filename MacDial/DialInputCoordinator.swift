@@ -4,6 +4,7 @@ import Foundation
 // are injected, so routing can be checked without a device.
 final class DialInputCoordinator {
     static let idleTimeout: TimeInterval = 10
+    var onPressBegan: (() -> Void)?
     var onShortPress: (() -> Void)?
     var onRotation: ((Dial.Rotation, Int) -> Void)?
     var onCancelAction: (() -> Void)?
@@ -72,7 +73,10 @@ final class DialInputCoordinator {
         }
 
         if changed {
-            if pressed { button.pressed(at: timestamp) }
+            if pressed {
+                if picker == nil { onPressBegan?() }
+                button.pressed(at: timestamp)
+            }
             else { button.released(at: timestamp) }
         } else if pressed {
             button.advance(at: timestamp)

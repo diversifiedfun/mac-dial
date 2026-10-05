@@ -16,7 +16,14 @@ The app supports four general modes, plus contextual Lightroom Classic modes:
 * Scroll mode: Turning the dial will result in scrolling. A short press clicks at the current cursor position when released. Press-and-hold dragging is not supported.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
-* Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. A short press undoes once on release; holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
+* Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. Single-click to undo once; double-click to redo once. Holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
+
+Single-click Undo waits for the macOS double-click interval. A second short
+press begun within that interval sends only one Redo, with no preliminary Undo.
+A second hold cancels the waiting click and opens the picker. Rotation remains
+immediate and cancels any waiting click; changing modes or apps, disconnecting,
+and other input cancellations also discard it. These click timings apply only
+to Undo/Redo mode. Picker confirmation still uses one immediate short click.
 
 Undo/Redo sends complete key-down/key-up pairs to the foreground process. If
 focus changes during a rotation batch, the started pair finishes in the original
@@ -179,7 +186,7 @@ require removing and re-adding it under Privacy & Security > Accessibility
   Add `--build-only` to compile the preview without opening it.
 
 The Undo/Redo Release build, strict code-signature verification,
-603 recording-only behavior checks, and 546 native-view checks pass.
+650 recording-only behavior checks, and 546 native-view checks pass.
 The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure
@@ -187,8 +194,9 @@ recovery, restoration after dismissal, haptic suppression, queued rotation, all 
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, nonoverlapping pointer targets, and placement on displays with negative
-coordinates. Undo/Redo checks also cover exact per-tick shortcuts, single-click
-undo, focus changes during a batch, menu gesture suppression, and both general
+coordinates. Undo/Redo checks also cover exact per-tick shortcuts, delayed single-click
+undo, exclusive double-click redo, click-and-hold cancellation, focus changes during
+a batch or click delay, menu gesture suppression, and both general
 and Lightroom persistence. Physical Dial input and live Undo/Redo shortcuts remain
 unverified; test rotation and clicking on a disposable document.
 

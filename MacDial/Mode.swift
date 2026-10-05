@@ -58,7 +58,7 @@ enum Mode: String, CaseIterable {
     var usageHelp: String? {
         switch self {
         case .undoRedo:
-            return "Turn left to undo; turn right to redo, one step per tick. Click to undo once. Requires Command+Z and Shift+Command+Z support in the focused app."
+            return "Turn left to undo; turn right to redo, one step per tick. Click to undo once; double-click to redo once. Single clicks wait for the macOS double-click interval. Requires Command+Z and Shift+Command+Z support in the focused app."
         case .lightroomBrush:
             return "Activate Remove before turning. With Remove inactive, turning may change photo star ratings."
         default: return nil

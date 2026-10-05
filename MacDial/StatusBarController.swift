@@ -126,7 +126,7 @@ class StatusBarController
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     
     struct MenuItems {
-        let title = NSMenuItem.init(title: "Mac Dial")
+        let title = NSMenuItem.init(title: "About Mac Dial")
         let connectionStatus = NSMenuItem.init()
         let separator = NSMenuItem.separator()
         let scrollMode = ControllerOptionItem.init(title: "Scroll mode", mode: .scrolling, controller: ScrollController())
@@ -472,7 +472,27 @@ class StatusBarController
     }
 
     @objc func showAbout(sender: AnyObject) {
-        
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        let credits = NSMutableAttributedString(
+            string: "Original author: Andreas Karlsson\n\n",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: paragraphStyle
+            ])
+        credits.append(NSAttributedString(
+            string: "View original project on GitHub",
+            attributes: [
+                .link: "https://github.com/andreasjhkarlsson/mac-dial",
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .paragraphStyle: paragraphStyle
+            ]))
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Mac Dial",
+            .credits: credits
+        ])
     }
     
     @objc func setMode(sender: AnyObject) {

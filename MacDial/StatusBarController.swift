@@ -147,7 +147,8 @@ class StatusBarController
         let playbackMode = ControllerOptionItem.init(title: "Playback mode", mode: .playback, controller: PlaybackController())
         let zoomMode = ControllerOptionItem(title: "Zoom mode", mode: .zoom, controller: ZoomController())
         let undoRedoMode = ControllerOptionItem(title: "Undo/Redo mode", mode: .undoRedo, controller: UndoRedoController())
-        var modeItems: [ControllerOptionItem] { [scrollMode, playbackMode, zoomMode, undoRedoMode] }
+        let brightnessMode = ControllerOptionItem(title: "Brightness mode", mode: .brightness, controller: BrightnessController())
+        var modeItems: [ControllerOptionItem] { [scrollMode, playbackMode, zoomMode, undoRedoMode, brightnessMode] }
         let lightroom = NSMenuItem(title: "Lightroom")
         let lightroomModes = AppProfile.lightroom.modes.map {
             ControllerOptionItem(title: $0.title, mode: $0, controller: LightroomController(mode: $0))

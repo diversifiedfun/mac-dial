@@ -168,7 +168,7 @@ for segment in view.menuLayout.segments {
     view.mouseDown(with: mouse(.leftMouseDown, at: location))
     view.mouseUp(with: mouse(.leftMouseUp, at: location))
 }
-check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips the app parent and selects all seven leaves")
+check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips the app parent and selects every available mode")
 check(highlights.count == AppProfile.lightroom.availableModes.count * 2, "The parent cannot be highlighted")
 let parent = view.menuLayout.appGroupSegment!
 let parentPoint = view.menuLayout.point(angle: parent.angle, radius: parent.iconRadius)

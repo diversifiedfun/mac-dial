@@ -173,7 +173,11 @@ final class RadialMenuView: NSView {
             button.action = #selector(selectIcon(_:))
             button.tag = Mode.allCases.firstIndex(of: mode)!
             let p = menuLayout.point(angle: segment.angle, radius: segment.iconRadius)
-            button.frame = NSRect(x: p.x - 25, y: p.y - 25, width: 50, height: 50)
+            // The three Lightroom children share a narrower arc as general
+            // modes are added. Keep their native hit targets from overlapping.
+            let targetSize: CGFloat = segment.innerRadius == 150 ? 44 : 50
+            button.frame = NSRect(x: p.x - targetSize / 2, y: p.y - targetSize / 2,
+                                  width: targetSize, height: targetSize)
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityLabel("\(mode.title) mode")
             button.toolTip = mode.usageHelp

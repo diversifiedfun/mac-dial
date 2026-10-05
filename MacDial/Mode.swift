@@ -5,12 +5,13 @@ enum Mode: String, CaseIterable {
     case playback
     case zoom
     case undoRedo
+    case brightness
     case lightroomCrop
     case lightroomFineTune
     case lightroomBrush
     case editwallSequence
 
-    static let generalModes: [Mode] = [.scrolling, .playback, .zoom, .undoRedo]
+    static let generalModes: [Mode] = [.scrolling, .playback, .zoom, .undoRedo, .brightness]
 
     var isLightroom: Bool { AppProfile.lightroom.modes.contains(self) }
 
@@ -20,6 +21,7 @@ enum Mode: String, CaseIterable {
         case .playback: return "Playback"
         case .zoom: return "Zoom"
         case .undoRedo: return "Undo/Redo"
+        case .brightness: return "Brightness"
         case .lightroomCrop: return "Crop & Browse"
         case .lightroomFineTune: return "Fine Tune"
         case .lightroomBrush: return "Remove"
@@ -33,6 +35,7 @@ enum Mode: String, CaseIterable {
         case .playback: return "speaker.wave.2"
         case .zoom: return "plus.magnifyingglass"
         case .undoRedo: return "arrow.uturn.backward"
+        case .brightness: return "sun.max"
         case .lightroomCrop: return "crop"
         case .lightroomFineTune: return "slider.horizontal.3"
         case .lightroomBrush: return "paintbrush"
@@ -62,6 +65,8 @@ enum Mode: String, CaseIterable {
 
     var usageHelp: String? {
         switch self {
+        case .brightness:
+            return "Turn right to brighten; turn left to dim in fine steps using the Mac's brightness keys. Click to set the screen under the pointer to zero; click again on that screen to restore its saved brightness. Each screen remembers its own level. Hold to choose a mode. Scroll Direction does not affect brightness. The Photography (P3-D65) display preset can block the click toggle even when rotation still works."
         case .scrolling:
             return "Turn to scroll. Click to cycle Stepped / Freestyle / Precision. Precision adds a short glide; Freestyle accelerates faster turns with a longer glide for long pages. Pressing stops motion immediately. Hold to choose a mode."
         case .editwallSequence:

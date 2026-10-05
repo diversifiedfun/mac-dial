@@ -349,7 +349,7 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
                   "Starting-position selection never leaks a mode action")
         }
 
-        for ticks in 0...3 {
+        for ticks in Mode.generalModes.indices {
             let h = Harness()
             h.profile = profile
             h.mode = mode
@@ -358,7 +358,7 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
             h.open()
             for _ in 0..<ticks { h.report(.released, .Clockwise(1)) }
             check(h.input.picker?.selectedMode == Mode.generalModes[ticks] && h.mode == mode,
-                  "Zero through three clockwise ticks predictably highlight the general choices")
+                  "Counted clockwise ticks predictably highlight the general choices")
             h.click()
             check(h.commits == [Mode.generalModes[ticks]] && h.savedMode == Mode.generalModes[ticks].savedValue,
                   "A short click confirms and saves the counted choice")
@@ -554,9 +554,11 @@ do {
     h.input.moveSelection(by: 1)
     check(h.input.picker?.selectedMode == .undoRedo, "Undo/Redo follows Zoom")
     h.input.moveSelection(by: 1)
+    check(h.input.picker?.selectedMode == .brightness, "Brightness follows Undo/Redo")
+    h.input.moveSelection(by: 1)
     check(h.input.picker?.selectedMode == .scrolling, "Clockwise selection wraps")
     h.input.moveSelection(by: -1)
-    check(h.input.picker?.selectedMode == .undoRedo, "Counterclockwise selection wraps")
+    check(h.input.picker?.selectedMode == .brightness, "Counterclockwise selection wraps")
     h.input.highlight(.playback)
     h.input.confirmSelection()
     check(h.mode == .playback && h.savedMode == "playback", "Pointer/keyboard confirmation commits")
@@ -669,7 +671,7 @@ do {
     picker.rotate(.CounterClockwise(2))
     check(picker.selectedMode == .scrolling, "Opposing multi-tick movement returns to the starting choice")
     picker.rotate(.Clockwise(2))
-    picker.select(.undoRedo)
+    picker.select(.brightness)
     picker.rotate(.Clockwise(1))
     check(picker.selectedMode == .scrolling, "One tick after pointer selection immediately advances")
     picker.rotate(.Clockwise(0))
@@ -820,8 +822,48 @@ do {
 // must not produce any mode action, regardless of the current mode.
 var media: [Int32] = []
 let playback = PlaybackController(post: { key, _, count in media += Array(repeating: key, count: count) })
-for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, playback), (.zoom, zoom), (.undoRedo, undoRedo)] {
-    mouse.removeAll(); keys.removeAll(); media.removeAll(); historyKeys.removeAll()
+final class RecordingBrightnessDisplays: DisplayBrightnessAccess {
+    var connected = [BrightnessDisplay(id: 1, identifier: "display-one")]
+    var levels: [String: Float] = ["display-one": 0.637]
+    var writes: [(BrightnessDisplay, Float)] = []
+    var failRead = false
+    var failWrite = false
+    var pointerIdentifier: String? = "display-one"
+    func preferredDisplay() -> BrightnessDisplay? { connected.first { $0.identifier == pointerIdentifier } }
+    func display(identifier: String) -> BrightnessDisplay? { connected.first { $0.identifier == identifier } }
+    func brightness(of display: BrightnessDisplay) -> Float? { failRead ? nil : levels[display.identifier] }
+    func setBrightness(_ level: Float, for display: BrightnessDisplay) -> Bool {
+        writes.append((display, level))
+        guard !failWrite else { return false }
+        levels[display.identifier] = level
+        return true
+    }
+}
+let brightnessSuite = "MacDial.BrightnessClickTests.\(UUID().uuidString)"
+let brightnessDefaults = UserDefaults(suiteName: brightnessSuite)!
+defer { brightnessDefaults.removePersistentDomain(forName: brightnessSuite) }
+let brightnessDisplays = RecordingBrightnessDisplays()
+var brightnessEvents: [(Int32, [NSEvent.ModifierFlags], Int)] = []
+let brightness = BrightnessController(displays: brightnessDisplays, defaults: brightnessDefaults,
+                                      unavailable: {}, post: { brightnessEvents.append(($0, $1, $2)) })
+for direction in [-1, 1] {
+    brightnessEvents.removeAll()
+    brightness.onRotate(.Clockwise(2), direction)
+    brightness.onRotate(.CounterClockwise(3), direction)
+    check(brightnessEvents.map { $0.0 } == [NX_KEYTYPE_BRIGHTNESS_UP, NX_KEYTYPE_BRIGHTNESS_DOWN]
+          && brightnessEvents.map { $0.2 } == [2, 3],
+          "Brightness preserves every tick and physical direction under either Scroll Direction")
+    check(brightnessEvents.allSatisfy { $0.1 == [.shift, .option] }, "Brightness uses fine adjustment modifiers")
+    brightness.onRotate(.Clockwise(0), direction)
+    brightness.onRotate(.CounterClockwise(-1), direction)
+    brightness.onDown()
+    brightness.onCancel()
+    brightness.onUp()
+    check(brightnessEvents.count == 2 && brightnessDisplays.writes.isEmpty,
+          "Empty rotations and cancelled clicks never change brightness")
+}
+for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, playback), (.zoom, zoom), (.undoRedo, undoRedo), (.brightness, brightness)] {
+    mouse.removeAll(); keys.removeAll(); media.removeAll(); historyKeys.removeAll(); brightnessEvents.removeAll(); brightnessDisplays.writes.removeAll()
     let h = Harness()
     h.mode = mode
     h.input.onPressBegan = { controller.onPressBegan() }
@@ -830,18 +872,21 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     h.input.onRotation = { controller.onRotate($0, $1) }
     let originalScrollStyle = scroll.style
     h.report(.pressed)
-    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "No controller output on initial press")
+    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty && brightnessEvents.isEmpty && brightnessDisplays.writes.isEmpty, "No controller output on initial press")
     h.clock.advance(0.6)
     h.report(.released)
     h.report(.released, .Clockwise(3))
     h.report(.pressed)
     h.clock.advance(0.1)
     h.report(.released, .Clockwise(3))
-    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "Opening, browsing, and confirmation never emit mode actions")
+    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty && brightnessEvents.isEmpty && brightnessDisplays.writes.isEmpty, "Opening, browsing, and confirmation never emit mode actions")
     if mode == .scrolling { check(scroll.style == originalScrollStyle, "Holds and picker confirmation never toggle Scroll") }
     h.click()
     switch mode {
     case .scrolling: check(mouse.isEmpty && scroll.style != originalScrollStyle, "Scroll toggles without emitting a mouse click")
+    case .brightness:
+        check(brightnessEvents.isEmpty && brightnessDisplays.writes.map { $0.1 } == [0],
+              "Brightness clicks set the native brightness to zero without synthetic keys")
     case .playback: check(media == [NX_KEYTYPE_PLAY], "Playback still plays/pauses on a short click")
     case .zoom: check(keys.count == 2, "Zoom still resets on a short click")
     case .undoRedo:
@@ -1025,9 +1070,9 @@ playback.onUp()
 check(media == [NX_KEYTYPE_PLAY, NX_KEYTYPE_PLAY, NX_KEYTYPE_NEXT], "Playback double-click still advances the track")
 // Lightroom is a flat sequence; the parent group is not an extra stop.
 let lightroomModes = AppProfile.lightroom.availableModes
-check(Mode.generalModes == [.scrolling, .playback, .zoom, .undoRedo], "Four standard modes have the requested order")
-check(lightroomModes == [.scrolling, .playback, .zoom, .undoRedo, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
-      "Seven choices have the requested clockwise order")
+check(Mode.generalModes == [.scrolling, .playback, .zoom, .undoRedo, .brightness], "Five standard modes have the requested order")
+check(lightroomModes == [.scrolling, .playback, .zoom, .undoRedo, .brightness, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
+      "Eight choices have the requested clockwise order")
 for start in lightroomModes {
     var picker = ModePickerState(selectedMode: start, profile: .lightroom)
     for next in 1...lightroomModes.count {
@@ -1140,12 +1185,12 @@ do {
 let groupedLayout = RadialMenuLayout(profile: .lightroom)
 check(groupedLayout.diameter == 432, "Contextual bounds are 432 points")
 let generalLayout = RadialMenuLayout(profile: nil)
-check(generalLayout.segments.map(\.angle) == [90, 0, -90, -180]
-      && generalLayout.segments.allSatisfy { $0.sweep == 90 }, "Standard modes occupy four equal cardinal wedges")
-check(groupedLayout.segments.filter { $0.outerRadius == 150 }.count == 5
-      && groupedLayout.segments.filter { $0.outerRadius == 150 }.allSatisfy { $0.sweep == 72 },
-      "Four standard modes and Lightroom occupy five equal inner wedges")
-check(groupedLayout.segments.filter { $0.innerRadius == 150 }.map(\.sweep) == [24, 24, 24],
+check(generalLayout.segments.map(\.angle) == [90, 18, -54, -126, -198]
+      && generalLayout.segments.allSatisfy { $0.sweep == 72 }, "Standard modes occupy five equal wedges")
+check(groupedLayout.segments.filter { $0.outerRadius == 150 }.count == 6
+      && groupedLayout.segments.filter { $0.outerRadius == 150 }.allSatisfy { $0.sweep == 60 },
+      "Five standard modes and Lightroom occupy six equal inner wedges")
+check(groupedLayout.segments.filter { $0.innerRadius == 150 }.map(\.sweep) == [20, 20, 20],
       "Lightroom children equally divide the parent's outer arc")
 check((0..<360).allSatisfy { degrees in
     let point = groupedLayout.point(angle: CGFloat(degrees) + 0.5, radius: 183)
@@ -1367,7 +1412,7 @@ let sequenceLayout = RadialMenuLayout(profile: .editwall)
 let sequenceSegment = sequenceLayout.segment(for: .editwallSequence)!
 check(sequenceLayout.mode(at: sequenceLayout.point(angle: sequenceSegment.angle, radius: sequenceSegment.iconRadius)) == .editwallSequence,
       "Sequence outer icon hits the Sequence mode")
-check(AppProfile.editwall.availableModes == Mode.generalModes + [.editwallSequence], "Editwall has four general modes and one Sequence submode")
+check(AppProfile.editwall.availableModes == Mode.generalModes + [.editwallSequence], "Editwall has five general modes and one Sequence submode")
 // Confirmation is a presentation of an already accepted mode, never a delayed commit.
 for profile: AppProfile? in [nil, .lightroom, .editwall] {
     for enabled in [false, true] {
@@ -1960,6 +2005,214 @@ do {
         check(ScrollStyle.load(from: UserDefaults(suiteName: suite)!) == style, "Scroll style survives preference reload")
     }
     defaults.removeObject(forKey: "scrollStyle")
+}
+
+
+// Brightness is a general choice and retains the existing per-app isolation.
+do {
+    let suite = "MacDial.BrightnessTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let context = AppModeContext(defaults: defaults)
+    check(context.select(.brightness), "Brightness is available outside app profiles")
+    check(AppModeContext(defaults: defaults).currentMode == .brightness, "Brightness survives relaunch")
+    for profile in [AppProfile.lightroom, .editwall] {
+        context.activate(bundleIdentifier: profile.bundleIdentifier)
+        check(context.currentMode == .brightness, "App profiles inherit general Brightness")
+        check(context.select(.brightness), "Brightness is selectable in each app profile")
+        context.activate(bundleIdentifier: nil)
+        context.select(.zoom)
+        context.activate(bundleIdentifier: profile.bundleIdentifier)
+        check(context.currentMode == .brightness, "Per-app Brightness survives general mode changes")
+        context.activate(bundleIdentifier: nil)
+        context.select(.brightness)
+    }
+}
+
+// A recording native backend exercises restoration without changing any screen.
+do {
+    let suite = "MacDial.BrightnessRestoreTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let displays = RecordingBrightnessDisplays()
+    var errors = 0
+    func controller() -> BrightnessController {
+        BrightnessController(displays: displays, defaults: defaults, unavailable: { errors += 1 }, post: { _, _, _ in })
+    }
+    func click(_ c: BrightnessController) { c.onDown(); c.onUp() }
+    let c = controller()
+    c.onUp()
+    c.onDown(); c.onCancel(); c.onUp()
+    check(displays.writes.isEmpty, "Unpaired releases and cancelled clicks do not change native brightness")
+    click(c)
+    check(displays.levels["display-one"] == 0, "The first click sets brightness to zero")
+    c.onUp()
+    check(displays.writes.count == 1, "A duplicate release cannot restore prematurely")
+    c.onCancel() // Mode/lifecycle changes cancel gestures, not the stored level.
+    displays.failRead = true
+    click(controller())
+    check(displays.levels["display-one"] == 0.637, "A new controller restores the exact saved level even if reading is unavailable")
+    displays.failRead = false
+    displays.levels["display-one"] = 0.283
+    click(c)
+    displays.levels["display-one"] = 0.1 // Rotation or another brightness control.
+    c.onRotate(.Clockwise(1), -1)
+    click(c)
+    check(displays.levels["display-one"] == 0.283, "Each cycle captures a fresh level and later adjustments do not overwrite it")
+    click(c); click(c)
+    check(displays.writes.suffix(2).map { $0.1 } == [0, 0.283], "Two quick clicks dim then restore immediately")
+
+    displays.levels["display-one"] = 0
+    let beforeZero = displays.writes.count
+    click(c)
+    check(displays.writes.count == beforeZero, "Starting at zero without a saved level never invents a brightness")
+    for invalid: Float? in [nil, .nan, .infinity, -0.1, 1.1] {
+        displays.levels["display-one"] = invalid
+        click(c)
+    }
+    check(displays.writes.count == beforeZero && errors == 5, "Unreadable and invalid native levels cannot cause a write")
+    displays.levels["display-one"] = 0.72
+    displays.failWrite = true
+    click(c)
+    check(errors == 6 && displays.levels["display-one"] == 0.72, "A failed dim is reported")
+    displays.failWrite = false
+    click(c)
+    check(displays.writes.last?.1 == 0.72, "After a failed dim, the retained snapshot restores safely")
+    click(c)
+    displays.failWrite = true
+    click(c)
+    check(displays.levels["display-one"] == 0 && errors == 7, "A failed restore is reported and stays pending")
+    displays.failWrite = false
+    click(controller())
+    check(displays.levels["display-one"] == 0.72, "Restore failure can be retried after relaunch")
+
+    click(c)
+    displays.connected = [BrightnessDisplay(id: 1, identifier: "other-display")]
+    displays.levels["other-display"] = 0.9
+    let beforeDisconnect = displays.writes.count
+    click(c)
+    check(displays.writes.count == beforeDisconnect && displays.levels["other-display"] == 0.9,
+          "A reused display ID never receives another display's saved brightness")
+    displays.connected.append(BrightnessDisplay(id: 22, identifier: "display-one"))
+    click(c)
+    check(displays.writes.last?.0.id == 22 && displays.levels["display-one"] == 0.72,
+          "Restoration follows the original display's identity after reconnect even if the main display changes")
+    displays.connected = []
+    let beforeNoDisplay = displays.writes.count
+    click(c)
+    check(displays.writes.count == beforeNoDisplay, "No display means no dim or restore write")
+
+    displays.connected = [BrightnessDisplay(id: 1, identifier: "display-one")]
+    for invalid: Float in [0, -1, 2] {
+        defaults.set(["display": "display-one", "brightness": invalid], forKey: "brightnessRestore")
+        displays.levels["display-one"] = 0.4
+        click(c); click(c)
+        check(displays.levels["display-one"] == 0.4, "Invalid saved values are replaced by a fresh valid snapshot")
+    }
+}
+
+// Every hold duration and app profile preserves a pending restore while the
+// picker is open, cancelled, or confirmed; its release cannot toggle the screen.
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
+    for duration in MenuPressDuration.allCases {
+        let suite = "MacDial.BrightnessRoutingTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let displays = RecordingBrightnessDisplays()
+        let c = BrightnessController(displays: displays, defaults: defaults, unavailable: {}, post: { _, _, _ in })
+        let h = Harness()
+        h.mode = .brightness
+        h.profile = profile
+        h.input.menuPressDuration = duration
+        h.input.onShortPress = { c.onDown(); c.onUp() }
+        h.input.onCancelAction = { c.onCancel() }
+        h.input.onRotation = { c.onRotate($0, $1) }
+        h.click()
+        h.open()
+        h.input.highlight(.brightness)
+        h.report(.pressed)
+        h.clock.advance(duration.seconds + 1)
+        h.report(.released, .Clockwise(3))
+        check(displays.writes.map { $0.1 } == [0], "Opening and confirming the picker preserve zero without restoring")
+        h.open()
+        h.input.cancel()
+        h.click()
+        check(displays.writes.map { $0.1 } == [0, 0.637], "The next short click restores after picker confirmation and cancellation")
+    }
+}
+
+// Pointer targeting never silently redirects a click to the main screen.
+do {
+    let main = BrightnessDisplay(id: 1, identifier: "main")
+    let left = BrightnessDisplay(id: 4, identifier: "left")
+    let above = BrightnessDisplay(id: 5, identifier: "above")
+    let regions = [(display: main, frame: NSRect(x: 0, y: 0, width: 1440, height: 900)),
+                   (display: left, frame: NSRect(x: -1920, y: -200, width: 1920, height: 1080)),
+                   (display: above, frame: NSRect(x: 100, y: 900, width: 1280, height: 720))]
+    for (point, expected) in [(NSPoint(x: 500, y: 100), main),
+                               (NSPoint(x: -400, y: 100), left),
+                               (NSPoint(x: 500, y: 1200), above)] {
+        check(SystemDisplayBrightness.display(at: point, in: regions) == expected,
+              "Clicks choose the pointer screen in shared AppKit coordinates")
+    }
+    check(SystemDisplayBrightness.display(at: NSPoint(x: -4000, y: 0), in: regions) == nil,
+          "A pointer outside known screens never falls back to the main display")
+    check(SystemDisplayBrightness.display(at: .zero, in: []) == nil, "No screens means no brightness target")
+}
+do {
+    let suite = "MacDial.PointerBrightnessTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let displays = RecordingBrightnessDisplays()
+    displays.connected.append(BrightnessDisplay(id: 4, identifier: "display-two"))
+    displays.levels["display-two"] = 0.67
+    func controller() -> BrightnessController {
+        BrightnessController(displays: displays, defaults: defaults, unavailable: {}, post: { _, _, _ in })
+    }
+    func click(_ c: BrightnessController) { c.onDown(); c.onUp() }
+    let c = controller()
+    displays.pointerIdentifier = "display-two"
+    click(c)
+    check(displays.levels["display-two"] == 0 && displays.levels["display-one"] == 0.637,
+          "The first click dims the pointer screen instead of the main display")
+    displays.pointerIdentifier = "display-one"
+    click(c)
+    check(displays.levels["display-two"] == 0 && displays.levels["display-one"] == 0,
+          "Moving the pointer dims a second screen without restoring the first")
+    displays.pointerIdentifier = "display-two"
+    click(controller())
+    check(displays.levels["display-two"] == 0.67 && displays.levels["display-one"] == 0,
+          "After relaunch each screen restores only its own saved level")
+    displays.pointerIdentifier = "display-one"
+    click(c)
+    check(displays.levels["display-one"] == 0.637 && defaults.object(forKey: "brightnessRestore") == nil,
+          "Restoring both displays removes only their own pending entries")
+    defaults.set(["display": "display-two", "brightness": 0.42], forKey: "brightnessRestore")
+    displays.levels["display-two"] = 0
+    click(c)
+    displays.pointerIdentifier = "display-two"
+    click(c)
+    check(displays.levels["display-two"] == 0.42 && displays.levels["display-one"] == 0,
+          "A legacy single-display snapshot migrates without redirecting clicks or losing another screen's level")
+    displays.pointerIdentifier = nil
+    let count = displays.writes.count
+    click(c)
+    check(displays.writes.count == count, "No pointer screen does not consume any pending restore")
+}
+do {
+    check(!SystemDisplayBrightness.verifiedWrite(0, write: { true }, read: { 1 }),
+          "A driver reporting success without changing brightness is a failure")
+    check(SystemDisplayBrightness.verifiedWrite(0, write: { true }, read: { 0 }),
+          "A zero write succeeds only when its brightness readback matches")
+    check(SystemDisplayBrightness.verifiedWrite(0.67, write: { true }, read: { 0.67001 }),
+          "Restore verification tolerates minor floating-point rounding")
+    for value: Float? in [nil, .nan, .infinity, -1, 2, 0.5] {
+        check(!SystemDisplayBrightness.verifiedWrite(0.67, write: { true }, read: { value }),
+              "Missing, invalid and mismatched readback cannot discard the saved brightness")
+    }
+    var read = false
+    check(!SystemDisplayBrightness.verifiedWrite(0, write: { false }, read: { read = true; return 0 }) && !read,
+          "A failed native write cannot succeed just because readback already matches")
 }
 
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

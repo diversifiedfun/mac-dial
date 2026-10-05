@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		F01400000000000000000002 /* DialReportDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01400000000000000000001 /* DialReportDecoder.swift */; };
 		F01200000000000000000002 /* UndoRedoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200000000000000000001 /* UndoRedoController.swift */; };
+		F01500000000000000000002 /* BrightnessController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01500000000000000000001 /* BrightnessController.swift */; };
+		F01600000000000000000002 /* SystemDisplayBrightness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01600000000000000000001 /* SystemDisplayBrightness.swift */; };
 		F01300000000000000000002 /* EditwallSequenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01300000000000000000001 /* EditwallSequenceController.swift */; };
 		C882FA1A26F1430C00595EE1 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C882FA1926F1430C00595EE1 /* AppDelegate.swift */; };
 		C882FA1E26F1430D00595EE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C882FA1D26F1430D00595EE1 /* Assets.xcassets */; };
@@ -38,6 +40,8 @@
 /* Begin PBXFileReference section */
 		F01400000000000000000001 /* DialReportDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialReportDecoder.swift; sourceTree = "<group>"; };
 		F01200000000000000000001 /* UndoRedoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoRedoController.swift; sourceTree = "<group>"; };
+		F01500000000000000000001 /* BrightnessController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrightnessController.swift; sourceTree = "<group>"; };
+		F01600000000000000000001 /* SystemDisplayBrightness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemDisplayBrightness.swift; sourceTree = "<group>"; };
 		F01300000000000000000001 /* EditwallSequenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditwallSequenceController.swift; sourceTree = "<group>"; };
 		C882FA1626F1430C00595EE1 /* MacDial.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacDial.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C882FA1926F1430C00595EE1 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -108,6 +112,8 @@
 				F00100000000000000000001 /* DialButtonHandler.swift */,
 				F00200000000000000000001 /* ZoomController.swift */,
 				F01200000000000000000001 /* UndoRedoController.swift */,
+				F01500000000000000000001 /* BrightnessController.swift */,
+				F01600000000000000000001 /* SystemDisplayBrightness.swift */,
 				F01300000000000000000001 /* EditwallSequenceController.swift */,
 				F00700000000000000000001 /* RadialMenuController.swift */,
 				F01000000000000000000001 /* RadialMenuLayout.swift */,
@@ -225,6 +231,8 @@
 				F00100000000000000000002 /* DialButtonHandler.swift in Sources */,
 				F00200000000000000000002 /* ZoomController.swift in Sources */,
 				F01200000000000000000002 /* UndoRedoController.swift in Sources */,
+				F01500000000000000000002 /* BrightnessController.swift in Sources */,
+				F01600000000000000000002 /* SystemDisplayBrightness.swift in Sources */,
 				F01300000000000000000002 /* EditwallSequenceController.swift in Sources */,
 				F00700000000000000000002 /* RadialMenuController.swift in Sources */,
 				F01000000000000000000002 /* RadialMenuLayout.swift in Sources */,

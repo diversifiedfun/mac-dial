@@ -12,11 +12,35 @@ You can find universal builds of the app under "releases". Note that these build
 
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
-The app supports four general modes, plus contextual Lightroom Classic and Editwall modes:
+The app supports five general modes, plus contextual Lightroom Classic and Editwall modes:
 * Scroll mode: Turn to scroll. Short-click to cycle Stepped / Freestyle / Precision; pressing immediately stops ongoing motion. Hold to open the mode picker. Scroll no longer sends mouse clicks.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
+* Brightness mode: Clockwise brightens and counterclockwise dims, using the Mac's brightness keys with Shift+Option for fine steps. Click saves the brightness of the screen under the pointer and sets it to zero; click again on that screen to restore its level. Hold opens the picker. Scroll Direction does not reverse brightness. Works with displays that respond to macOS brightness keys; direct external-monitor DDC control is not included.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
 * Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. Single-click to undo once; double-click to redo once. Holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
+
+
+Brightness clicks target the screen under the pointer, with a separate saved
+level for each physical display. Move the pointer back onto a dimmed screen and
+click to restore it. Saved levels survive mode changes, reconnects, sleep, and app
+restarts, even if brightness was adjusted in between. Clicks never fall back to
+a different screen. If a native write fails or its readback does not match, the
+saved level is kept for a retry; an unavailable operation beeps. At zero without a saved level, clicking
+leaves brightness unchanged. Rotation still uses macOS brightness keys. The
+click toggle requires the optionally loaded macOS DisplayServices API; it does
+not use a black overlay or turn the display off.
+
+**Photography display preset:** On the built-in Liquid Retina XDR display,
+the user observed that **Photography (P3-D65)** prevents direct brightness
+changes, including the click-to-zero/restore toggle, while brightness-key
+events still work. This explains why dial rotation can work when clicking does
+not: rotation sends brightness-key events, while clicks use DisplayServices to
+set an exact value. In this configuration the API reported success without
+changing brightness, and its readback stayed at 100% even for requests to set
+0%, 25%, or 50%. This is a display-preset limitation observed on this Mac, not
+a general inability to control the laptop display. If you need the click
+toggle, choose a display preset that permits brightness adjustment. Mac Dial
+does not change the display preset automatically.
 
 Single-click Undo waits for the macOS double-click interval. A second short
 press begun within that interval sends only one Redo, with no preliminary Undo.
@@ -85,8 +109,8 @@ Sensitivity, to use **200, 300, 400, 500, or 600 ms**. The choice is saved acros
 launches and controls the hold that opens the picker. Once the picker is armed,
 the next press selects immediately, regardless of how long it is held.
 A 300-point native macOS wheel opens at the pointer and stays within
-that display's visible area. Four equal wedges place Scroll at the top, Playback
-at the right, Zoom at the bottom, and Undo/Redo at the left. The center names the
+that display's visible area. Five equal wedges place Scroll at the top, followed clockwise by Playback,
+Zoom, Undo/Redo, and Brightness. The center names the
 highlighted mode and shows picker navigation instructions.
 
 Choose **Radial Menu Starts At**, immediately below Menu Press Duration in the
@@ -98,7 +122,7 @@ menu bar, to control the opening highlight:
 
 With First Item, **hold → release → turn → click**: no rotation highlights
 Scroll, one clockwise tick highlights Playback, two highlight Zoom, and three
-highlight Undo/Redo. Click to confirm. Opening, browsing, and cancelling leave
+highlight Undo/Redo. Four ticks highlight Brightness. Click to confirm. Opening, browsing, and cancelling leave
 the active mode unchanged. Each opening starts from the first item again, even
 after confirming another mode. Enable Haptics to feel each selection step.
 
@@ -110,7 +134,7 @@ order changes in a future version; it does not override saved app-specific modes
 The opening hold only opens the picker; releasing it arms selection. The current
 mode continues to be the saved mode until the next press confirms immediately.
 Holding that confirming press cannot cancel or reopen the picker; its repeated
-reports and eventual release are consumed. Clockwise advances Scroll → Playback → Zoom → Undo/Redo, wrapping in either
+reports and eventual release are consumed. Clockwise advances Scroll → Playback → Zoom → Undo/Redo → Brightness, wrapping in either
 direction. Each rotation tick advances exactly one choice, with one automatic
 haptic click when Haptics is enabled. Wheel Sensitivity controls menu spacing:
 
@@ -153,7 +177,7 @@ an earlier configuration is ignored while valid button releases are preserved.
 
 Scroll clicks now wait until a short press is released. This prevents a long
 press from clicking or dragging anything underneath the wheel. Menu gestures
-never send scroll, playback, zoom, or history actions; a confirmation report's rotation
+never send scroll, playback, zoom, history, or brightness actions; a confirmation report's rotation
 is also consumed. You can still select modes from the menu bar, and the chosen
 mode is remembered across launches using the existing preference values.
 
@@ -226,8 +250,8 @@ live check.
 
 ### Lightroom Classic modes
 
-When **Lightroom Classic is the foreground app**, the wheel shows five equal
-inner wedges: Scroll (top), then Playback, Zoom, Undo/Redo, and Lightroom clockwise.
+When **Lightroom Classic is the foreground app**, the wheel shows six equal
+inner wedges: Scroll (top), then Playback, Zoom, Undo/Redo, Brightness, and Lightroom clockwise.
 Three selectable icons equally divide the Lightroom wedge's outer arc, which is
 66 points thick. The inner wheel remains 300 points; the contextual shape uses a 432×432 coordinate
 area. Including its transparent effect margin, the floating window is 496×496
@@ -236,7 +260,7 @@ Lightroom’s installed app icon identifies its parent wedge, which is a visual
 group rather than another selection target.
 
 Turning still follows one continuous sequence, with no extra click to enter a
-submenu: **Scroll → Playback → Zoom → Undo/Redo → Crop & Browse → Fine Tune → Remove**.
+submenu: **Scroll → Playback → Zoom → Undo/Redo → Brightness → Crop & Browse → Fine Tune → Remove**.
 The sensitivity-dependent selection step, hold/release gesture, cancellation,
 keyboard navigation, and Haptics setting are the same in both layouts.
 The center shows the highlighted Lightroom mode’s turn and click actions.
@@ -264,7 +288,7 @@ On first use in Lightroom, the current general mode stays active until you
 explicitly select a mode. Later visits restore the last choice made in Lightroom,
 including a general mode if you selected one there. Leaving Lightroom restores
 your separately saved general mode. Both choices survive relaunches. Existing
-`mode` values (`scroll`, `playback`, `zoom`) remain compatible; Undo/Redo uses
+`mode` values (`scroll`, `playback`, `zoom`) remain compatible; Brightness uses `brightness`; Undo/Redo uses
 `undoRedo`. The Lightroom choice is stored under
 `appMode.com.adobe.LightroomClassicCC7`. Remove retains
 the existing `lightroomBrush` preference value, so saved selections remain compatible.
@@ -277,7 +301,7 @@ to that Lightroom process so its release cannot spill into another application.
 
 Initial support targets **Lightroom Classic** (`com.adobe.LightroomClassicCC7`)
 and the U.S. keyboard layout. Cloud Lightroom is not included. Merely keeping Lightroom open in the background does not enable its
-modes. Outside supported apps the four-mode general wheel returns.
+modes. Outside supported apps the five-mode general wheel returns.
 
 If you want to app to run at startup you will need to add it yourself to the "login items" for your user.
 

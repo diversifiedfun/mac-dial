@@ -674,20 +674,20 @@ for screen in [NSRect(x: 0, y: 25, width: 1440, height: 875),
     }
 }
 
-// Real mouse-event cancellation must never leave a drag held across modes.
+// Scroll clicks toggle styles and never synthesize mouse button events.
 var mouse: [CGEvent] = []
 let scroll = ScrollController(post: { mouse.append($0) })
 scroll.onDown()
 scroll.onDown()
 scroll.onCancel()
 scroll.onUp()
-scroll.onCancel()
-check(mouse.map(\.type) == [.leftMouseDown, .leftMouseUp], "Scroll cancellation must balance mouse down exactly once")
+check(scroll.style == .smooth && mouse.isEmpty, "Cancelled Scroll clicks do not toggle or emit mouse input")
 scroll.onDown()
 scroll.onUp()
-check(mouse.count == 4, "Scroll clicks must work again after cancellation")
+scroll.onUp()
+check(scroll.style == .stepped && mouse.isEmpty, "Scroll toggles exactly once on short release")
 scroll.onRotate(.Clockwise(1), -1)
-check(mouse.last!.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) < 0,
+check(mouse.last!.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == -24,
       "Saved Natural direction must retain clockwise-down scrolling")
 
 // Check actual keyboard events, including both edges and no inherited modifiers.
@@ -799,6 +799,7 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     h.input.onShortPress = { controller.onDown(); controller.onUp() }
     h.input.onCancelAction = { controller.onCancel() }
     h.input.onRotation = { controller.onRotate($0, $1) }
+    let originalScrollStyle = scroll.style
     h.report(.pressed)
     check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "No controller output on initial press")
     h.clock.advance(0.6)
@@ -808,9 +809,10 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     h.clock.advance(0.1)
     h.report(.released, .Clockwise(3))
     check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "Opening, browsing, and confirmation never emit mode actions")
+    if mode == .scrolling { check(scroll.style == originalScrollStyle, "Holds and picker confirmation never toggle Scroll") }
     h.click()
     switch mode {
-    case .scrolling: check(mouse.map(\.type) == [.leftMouseDown, .leftMouseUp], "Scroll emits one balanced click at short release")
+    case .scrolling: check(mouse.isEmpty && scroll.style != originalScrollStyle, "Scroll toggles without emitting a mouse click")
     case .playback: check(media == [NX_KEYTYPE_PLAY], "Playback still plays/pauses on a short click")
     case .zoom: check(keys.count == 2, "Zoom still resets on a short click")
     case .undoRedo:
@@ -1515,4 +1517,231 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
         check(frame.midX == center.x && frame.midY == center.y, "An unconstrained wheel remains centered on the pointer")
     }
 }
+// A chronological clock exercises frame cadence independently of real timers.
+final class ScrollHarness {
+    let clock = Clock()
+    var events: [CGEvent] = []
+    var eventTimes: [Double] = []
+    var pointerLocation = CGPoint(x: 100, y: 200)
+    var permitted = true
+    lazy var controller: ScrollController = {
+        let result = ScrollController(now: { [unowned self] in self.clock.time },
+                                      schedule: { [unowned self] in self.clock.schedule($0, $1) },
+                                      makeScrollEvent: { [unowned self] source, pixels in
+                                          let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel,
+                                                              wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0)
+                                          // Simulate the fresh pointer location supplied by Quartz,
+                                          // without moving or posting events to the real desktop.
+                                          event?.location = self.pointerLocation
+                                          return event
+                                      },
+                                      post: { [unowned self] in self.events.append($0); self.eventTimes.append(self.clock.time) })
+        result.canScroll = { [unowned self] in self.permitted }
+        return result
+    }()
+    func advance(_ seconds: Double) {
+        let end = clock.time + seconds
+        var frames = 0
+        while let next = clock.pending.map({ $0.0 }).min(), next <= end {
+            precondition(frames < 10000, "Scroll frame scheduler must make progress")
+            frames += 1
+            clock.time = max(clock.time, next)
+            clock.advance(0)
+        }
+        clock.time = max(clock.time, end)
+        clock.advance(0)
+    }
+    var pixels: [Int64] { events.map { $0.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) } }
+    var momentum: [CGEvent] { events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 } }
+    func fastTurn() {
+        controller.onRotate(.Clockwise(1), 1)
+        advance(0.03)
+        controller.onRotate(.Clockwise(1), 1)
+    }
+}
+
+for style in [ScrollStyle.smooth, .freewheel] {
+    for direction in [-1, 1] {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.controller.onRotate(.Clockwise(1), direction)
+        h.advance(0.025)
+        check(h.pixels.count >= 2 && h.pixels.allSatisfy { abs($0) < 24 }, "Animated scrolling splits a tick into small frames")
+        h.advance(0.2)
+        check(h.pixels.reduce(0, +) == 24 * direction && h.momentum.isEmpty, "An isolated tick preserves 24 pixels without coast")
+        check(h.events.first?.getIntegerValueField(.scrollWheelEventScrollPhase) == 1
+              && h.events.last?.getIntegerValueField(.scrollWheelEventScrollPhase) == 4, "Direct scroll phases balance")
+        check(h.clock.pending.isEmpty, "Idle scrolling schedules no more work")
+        check(h.events.allSatisfy { $0.getIntegerValueField(.scrollWheelEventIsContinuous) == 1 }, "Animated events use precise scrolling")
+        check(h.events.allSatisfy { event in
+            guard let native = NSEvent(cgEvent: event) else { return false }
+            return native.hasPreciseScrollingDeltas
+                && native.scrollingDeltaY == Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
+        }, "AppKit receives consistent precise pixel deltas")
+    }
+
+    do {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.fastTurn()
+        h.advance(1.3)
+        let direct = h.events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 }
+        let distance = direct.reduce(Int64(0)) { $0 + $1.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
+        check(abs(Double(distance) - (24 + 24 * (style == .freewheel ? 5.0 : 3.4))) <= 1, "Overlapping impulses preserve their accelerated distance")
+        check(h.momentum.first?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 1
+              && h.momentum.last?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 3, "Momentum begins and ends with Quartz phases")
+        check(h.momentum.contains { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 2 }, "Momentum has continuation frames")
+        check(h.events.allSatisfy { !($0.getIntegerValueField(.scrollWheelEventScrollPhase) != 0
+                                   && $0.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0) }, "Direct and momentum phases never overlap")
+        let coast = h.momentum.map { $0.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
+        check(coast.reduce(0, +) > 0 && coast.reduce(0, +) < (style == .freewheel ? 601 : 100) && h.clock.pending.isEmpty, "Coast is bounded and shuts down")
+        check(coast.first! > coast.dropLast().last!, "Coast decelerates")
+        let ended = h.events.firstIndex { $0.getIntegerValueField(.scrollWheelEventScrollPhase) == 4 }!
+        check(h.eventTimes.last! - h.eventTimes[ended] <= (style == .freewheel ? 1.0 : 0.30) + 1.0 / 120 + 0.00001,
+              "Momentum terminates within its style limit plus one scheduling frame")
+    }
+
+    // Moving the pointer during inertia must never replay the gesture's old
+    // location, even in a zero-delta end/cancel event or across display origins.
+    for cancel in [false, true] {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.fastTurn()
+        h.advance(0.15)
+        check(!h.momentum.isEmpty, "Pointer regression test starts during active inertia")
+        for position in [CGPoint(x: 420, y: 350), CGPoint(x: -800, y: 120)] {
+            h.pointerLocation = position
+            let count = h.events.count
+            h.advance(0.025)
+            let frames = h.events.dropFirst(count)
+            check(!frames.isEmpty && frames.allSatisfy { $0.location == position },
+                  "Moving the pointer during \(style.title) inertia preserves its current position")
+        }
+        h.pointerLocation = CGPoint(x: 600, y: -200)
+        let count = h.events.count
+        if cancel { h.controller.onPressBegan() }
+        else { h.advance(1.3) }
+        let ending = h.events.dropFirst(count)
+        check(!ending.isEmpty && ending.allSatisfy { $0.location == h.pointerLocation },
+              "Finishing or cancelling inertia never restores an old pointer position")
+        check(ending.last?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 3,
+              "Pointer movement preserves the balanced momentum ending")
+    }
+
+    for duringCoast in [false, true] {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.fastTurn()
+        h.advance(duringCoast ? 0.15 : 0.02)
+        h.controller.onRotate(.CounterClockwise(1), 1)
+        let count = h.events.count
+        h.advance(1.3)
+        check(h.pixels.dropFirst(count).allSatisfy { $0 <= 0 }, "Reversal never continues old-direction motion")
+    }
+
+    for reason in ["press", "cancel", "style", "context", "stall"] {
+        for duringCoast in [false, true] {
+            let h = ScrollHarness()
+            h.controller.setStyle(style)
+            h.fastTurn()
+            h.advance(duringCoast ? 0.15 : 0.02)
+            let count = h.events.count
+            switch reason {
+            case "press": h.controller.onPressBegan()
+            case "cancel": h.controller.onCancel()
+            case "style": h.controller.setStyle(.stepped)
+            case "context": h.permitted = false
+            default: h.clock.advance(1) // Deliver an overdue frame with no intermediate callbacks.
+            }
+            h.advance(1)
+            check(h.pixels.dropFirst(count).allSatisfy { $0 == 0 } && h.clock.pending.isEmpty,
+                  "\(reason) cancels direct motion and coast without catch-up or stale callbacks")
+        }
+    }
+}
+
+do {
+    let h = ScrollHarness()
+    h.controller.setStyle(.stepped)
+    h.controller.onRotate(.Clockwise(1), 1)
+    h.advance(0.01)
+    h.controller.onRotate(.Clockwise(1), 1)
+    check(h.pixels == [24, 96], "Stepped keeps original tick acceleration")
+    h.controller.onCancel()
+    h.controller.onRotate(.Clockwise(1), 1)
+    check(h.pixels.last == 24 && h.clock.pending.isEmpty, "Cancellation resets Stepped acceleration without scheduling frames")
+}
+
+// Freewheel must materially out-travel Smooth for the same fast input.
+do {
+    let smooth = ScrollHarness()
+    let freewheel = ScrollHarness()
+    freewheel.controller.setStyle(.freewheel)
+    smooth.fastTurn()
+    freewheel.fastTurn()
+    smooth.advance(0.5)
+    freewheel.advance(0.5)
+    check(smooth.clock.pending.isEmpty && !freewheel.clock.pending.isEmpty,
+          "Freewheel continues gliding after Smooth has stopped")
+    freewheel.advance(0.8)
+    check(freewheel.pixels.reduce(0, +) > smooth.pixels.reduce(0, +) * 3,
+          "Freewheel covers substantially more of a long page for the same fast turn")
+    check(freewheel.clock.pending.isEmpty, "Freewheel stops scheduling when its longer glide ends")
+}
+
+// The same button recognizer is used at every hold threshold and app profile.
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
+    for duration in MenuPressDuration.allCases {
+        let routing = Harness()
+        routing.profile = profile
+        routing.input.menuPressDuration = duration
+        let motion = ScrollHarness()
+        var changes: [ScrollStyle] = []
+        motion.controller.onStyleChanged = { changes.append($0) }
+        routing.input.onPressBegan = { motion.controller.onPressBegan() }
+        routing.input.onShortPress = { motion.controller.onDown(); motion.controller.onUp() }
+        routing.input.onCancelAction = { motion.controller.onCancel() }
+        routing.open()
+        routing.input.highlight(.scrolling)
+        routing.report(.pressed)
+        routing.clock.advance(0.05)
+        routing.report(.released, .Clockwise(3))
+        check(changes.isEmpty && motion.events.isEmpty, "Every hold threshold and profile consumes Scroll confirmation")
+        routing.click()
+        check(changes == [.stepped] && motion.events.isEmpty, "Short click changes style once with no mouse events")
+        routing.click()
+        check(changes == [.stepped, .freewheel], "Second click selects Freewheel")
+        routing.open()
+        routing.input.highlight(.scrolling)
+        routing.report(.pressed)
+        routing.clock.advance(0.05)
+        routing.report(.released)
+        check(changes == [.stepped, .freewheel], "Holding and confirming Scroll preserves Freewheel")
+        routing.click()
+        check(changes == [.stepped, .freewheel, .smooth] && motion.events.isEmpty,
+              "Third click wraps to Smooth without mouse events")
+    }
+}
+
+for sensitivity in WheelSensitivity.allCases {
+    let h = ScrollHarness()
+    h.controller.onRotate(.Clockwise(sensitivity.normalTicksPerRevolution), -1)
+    h.advance(0.2)
+    check(h.pixels.reduce(0, +) == Int64(-24 * sensitivity.normalTicksPerRevolution), "Every sensitivity preserves batched tick distance")
+}
+
+do {
+    let suite = "MacDial.ScrollTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    check(ScrollStyle.load(from: defaults) == .smooth, "Smooth is the default")
+    defaults.set("invalid", forKey: "scrollStyle")
+    check(ScrollStyle.load(from: defaults) == .smooth, "Unknown styles fall back to Smooth")
+    for style in ScrollStyle.allCases {
+        style.save(to: defaults)
+        check(ScrollStyle.load(from: UserDefaults(suiteName: suite)!) == style, "Scroll style survives preference reload")
+    }
+    defaults.removeObject(forKey: "scrollStyle")
+}
+
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

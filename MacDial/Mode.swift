@@ -62,6 +62,8 @@ enum Mode: String, CaseIterable {
 
     var usageHelp: String? {
         switch self {
+        case .scrolling:
+            return "Turn to scroll. Click to cycle Smooth / Stepped / Freewheel. Smooth adds a short glide; Freewheel accelerates faster turns with a longer glide for long pages. Pressing stops motion immediately. Hold to choose a mode."
         case .editwallSequence:
             return "Turn left: Up arrow, previous candidate. Turn right: Down arrow, next candidate. Click: Right arrow, next sequence slot. Double-click: Left arrow, previous sequence slot. Single clicks wait for the macOS double-click interval. Open Sequence in Editwall before using this mode."
         case .undoRedo:

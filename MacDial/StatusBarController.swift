@@ -100,6 +100,10 @@ extension NSMenu {
         }
         self.addItem(items.radialMenuAppearance)
         
+        items.scrollStyle.submenu = NSMenu()
+        for option in items.scrollStyleOptions { items.scrollStyle.submenu?.addItem(option) }
+        self.addItem(items.scrollStyle)
+
         items.scrollDirection.submenu = NSMenu.init()
         for scrollDirectionOption in items.scrollDirectionOptions {
             items.scrollDirection.submenu?.addItem(scrollDirectionOption)
@@ -173,6 +177,8 @@ class StatusBarController
             MenuOptionItem<RadialMenuStartPosition>(title: "Last Selected", option: .lastSelected),
             MenuOptionItem<RadialMenuStartPosition>(title: "First Item", option: .firstItem)
         ]
+        let scrollStyle = NSMenuItem(title: "Scroll Style")
+        let scrollStyleOptions = ScrollStyle.allCases.map { MenuOptionItem(title: $0.title, option: $0) }
         let scrollDirection = NSMenuItem.init(title: "Scroll Direction")
         let scrollDirectionOptions = [
             MenuOptionItem<ScrollDirection>.init(title: "Standard", option: .standard),
@@ -193,12 +199,23 @@ class StatusBarController
         menuItems.allModeItems.first { $0.option == currentMode }!.controller
     }
 
+    private var scrollController: ScrollController { menuItems.scrollMode.controller as! ScrollController }
+
+    private func refreshScrollStyleUI() {
+        for option in menuItems.scrollStyleOptions { option.selected = option.option == scrollController.style }
+        let help = "Scroll style: \(scrollController.style.title). Click to cycle Smooth / Stepped / Freewheel. Hold to choose a mode."
+        menuItems.scrollMode.toolTip = help
+        menuItems.scrollMode.setAccessibilityHelp(help)
+        updateIcon()
+    }
+
     var wheelSensitivity: WheelSensitivity? {
         get {
             let raw = UserDefaults.standard.string(forKey: "sensitivity") ?? WheelSensitivity.medium.rawValue
             return WheelSensitivity(rawValue: raw)
         }
         set (sensitivity) {
+            scrollController.onCancel()
             if !dial.updatePreferences(sensitivity: sensitivity ?? .medium) {
                 input.cancel()
             }
@@ -249,6 +266,7 @@ class StatusBarController
             return ScrollDirection(rawValue: raw)
         }
         set (scrollingDirection) {
+            scrollController.onCancel()
             switch scrollingDirection {
             case .standard:
                 dial.scrollDirection = 1
@@ -384,6 +402,23 @@ class StatusBarController
             self?.updateConnectionStatus()
         }
         
+        scrollController.setStyle(ScrollStyle.load())
+        scrollController.onStyleChanged = { [weak self] style in
+            guard let self = self else { return }
+            style.save()
+            self.refreshScrollStyleUI()
+            self.dial.feedback() // The hardware queue honors the Haptics setting.
+        }
+        scrollController.canScroll = { [weak self] in
+            guard let self = self, !self.refreshForegroundApplication() else { return false }
+            return self.currentMode == .scrolling && self.input.picker == nil
+        }
+        for option in menuItems.scrollStyleOptions {
+            option.target = self
+            option.action = #selector(setScrollStyle(sender:))
+        }
+        refreshScrollStyleUI()
+
         input.onPressBegan = { [weak self] in self?.currentController.onPressBegan() }
         input.onShortPress = { [weak self] in
             guard let self = self, !self.refreshForegroundApplication() else { return }
@@ -511,7 +546,8 @@ class StatusBarController
         let context = modeContext.profile.map { "\($0.title) — " } ?? ""
         button.toolTip = "Mac Dial — \(context)\(mode.title). Hold, release, turn, then click to choose a mode."
             + (mode.usageHelp.map { " " + $0 } ?? "")
-        button.setAccessibilityHelp(mode.usageHelp)
+            + (mode == .scrolling ? " Scroll style: \(scrollController.style.title)." : "")
+        button.setAccessibilityHelp(mode == .scrolling ? button.toolTip : mode.usageHelp)
         button.imagePosition = .imageLeft
     }
 
@@ -564,6 +600,12 @@ class StatusBarController
         wheelSensitivity = (item.representedObject as! WheelSensitivity)
     }
     
+    @objc func setScrollStyle(sender: AnyObject) {
+        let item = sender as! MenuOptionItem<ScrollStyle>
+        cancelPendingInput()
+        scrollController.setStyle(item.option)
+    }
+
     @objc func setScrollDirection(sender: AnyObject) {
         let item = sender as! NSMenuItem
         scrollDirection = (item.representedObject as! ScrollDirection)

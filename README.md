@@ -13,7 +13,7 @@ You can find universal builds of the app under "releases". Note that these build
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
 The app supports four general modes, plus contextual Lightroom Classic and Editwall modes:
-* Scroll mode: Turning the dial will result in scrolling. A short press clicks at the current cursor position when released. Press-and-hold dragging is not supported.
+* Scroll mode: Turn to scroll. Short-click to cycle Smooth / Stepped / Freewheel; pressing immediately stops ongoing motion. Hold to open the mode picker. Scroll no longer sends mouse clicks.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
 * Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. Single-click to undo once; double-click to redo once. Holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
@@ -28,6 +28,32 @@ Undo/Redo sends complete key-down/key-up pairs to the foreground process. If
 focus changes during a rotation batch, the started pair finishes in the original
 app and the remaining steps stop. No history action is sent when opening,
 cancelling, or confirming the picker.
+
+### Scroll styles
+
+**Smooth** is the default. Each tick is spread over approximately 80 ms, with
+small updates scheduled at 120 Hz. Repeated faster turns add a short decelerating
+coast, capped at 300 ms after the direct scroll ends. An isolated slow tick moves
+24 pixels without extra coast. Reversing direction discards the old glide.
+**Stepped** preserves the previous immediate, accelerated scroll jumps.
+**Freewheel** is for long pages: faster turns accelerate up to 6×, compared with
+Smooth’s 4×, and coast for up to one second after the direct scroll ends. Slow,
+isolated ticks still move 24 pixels without extra coast. Press to stop or reverse
+to discard the old glide, just as in Smooth. The pointer remains free to move
+throughout either style’s glide; inertia events never restore an old position.
+
+Short-click in Scroll to cycle **Smooth → Stepped → Freewheel → Smooth**, or use **Scroll Style → Smooth / Stepped / Freewheel**
+in the menu bar. The choice is remembered globally across apps and restarts.
+The menu checkmark and tooltip show the selected style; toggling gives a pulse
+only when Haptics is enabled, with no on-screen notification. Scroll remains a
+single radial-menu choice, and confirming it does not toggle the style.
+
+Pressing, changing style/direction/sensitivity, opening the picker, changing
+apps or modes, disconnecting, sleeping, and ending the session cancel motion.
+Delayed timer callbacks discard movement instead of producing a catch-up jump.
+Smooth and Freewheel send pixel scroll and momentum phases, but the exact feel depends on
+the receiving app; Stepped remains available for compatibility. Wheel Sensitivity
+and Haptics retain their existing hardware behavior.
 
 ### Radial mode picker
 

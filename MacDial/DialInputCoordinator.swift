@@ -13,6 +13,8 @@ final class DialInputCoordinator {
     var onFeedback: (() -> Void)?
     var onMenuNavigationChanged: ((Bool) -> Bool)?
     private(set) var picker: ModePickerState?
+    // Read only when opening; changing this never moves an existing highlight.
+    var radialMenuStartPosition: RadialMenuStartPosition = .lastSelected
 
     var menuPressDuration: MenuPressDuration {
         get { button.menuPressDuration }
@@ -152,7 +154,8 @@ final class DialInputCoordinator {
             cancel()
         } else {
             onCancelAction?()
-            picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile())
+            picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile(),
+                                     startPosition: radialMenuStartPosition)
             pickerGeneration += 1
             guard onMenuNavigationChanged?(true) ?? true else {
                 cancel()

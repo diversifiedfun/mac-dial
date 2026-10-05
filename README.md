@@ -41,6 +41,24 @@ that display's visible area. Four equal wedges place Scroll at the top, Playback
 at the right, Zoom at the bottom, and Undo/Redo at the left. The center names the
 highlighted mode and shows picker navigation instructions.
 
+Choose **Radial Menu Starts At**, immediately below Menu Press Duration in the
+menu bar, to control the opening highlight:
+
+- **Last Selected** (default) opens on the active mode for the current app.
+- **First Item** always highlights the first selectable item, currently Scroll,
+  so you can navigate by touch from a predictable starting point.
+
+With First Item, **hold → release → turn → click**: no rotation highlights
+Scroll, one clockwise tick highlights Playback, two highlight Zoom, and three
+highlight Undo/Redo. Click to confirm. Opening, browsing, and cancelling leave
+the active mode unchanged. Each opening starts from the first item again, even
+after confirming another mode. Enable Haptics to feel each selection step.
+
+This preference is saved across launches and applies to both the general and
+Lightroom menus. It takes effect on the next opening, without moving an already
+open menu's highlight. First Item follows the selectable menu order if that
+order changes in a future version; it does not override saved app-specific modes.
+
 The opening hold only opens the picker; releasing it arms selection. The current
 mode continues to be the saved mode until a subsequent short press confirms on
 release. Clockwise advances Scroll → Playback → Zoom → Undo/Redo, wrapping in either
@@ -168,7 +186,8 @@ require removing and re-adding it under Privacy & Security > Accessibility
 ### Verification and preview
 
 - `bash Tests/run.sh` runs hardware-independent checks of all five press durations
-  (including queued HID timestamps and changes during a hold), short clicks, menu routing, cancellation, selection
+  (including queued HID timestamps and changes during a hold), both radial menu
+  starting positions, short clicks, menu routing, cancellation, selection
   normalization, preference compatibility, multi-display placement, and actual
   controller events recorded without posting input to the desktop.
 - `bash Tests/render.sh` checks the native view's accessibility and input handlers
@@ -185,8 +204,8 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The Undo/Redo Release build, strict code-signature verification,
-650 recording-only behavior checks, and 546 native-view checks pass.
+The configurable radial-start Release build, strict code-signature verification,
+1,048 recording-only behavior checks, and 546 native-view checks pass.
 The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure
@@ -194,7 +213,11 @@ recovery, restoration after dismissal, haptic suppression, queued rotation, all 
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, nonoverlapping pointer targets, and placement on displays with negative
-coordinates. Undo/Redo checks also cover exact per-tick shortcuts, delayed single-click
+coordinates. Starting-position checks cover both policies from every available
+mode, zero through three counted ticks, reopening after confirmation, cancellation,
+preference persistence and invalid-value fallback, changes while open, and both
+rotation directions at every sensitivity in the general and Lightroom menus.
+Undo/Redo checks also cover exact per-tick shortcuts, delayed single-click
 undo, exclusive double-click redo, click-and-hold cancellation, focus changes during
 a batch or click delay, menu gesture suppression, and both general
 and Lightroom persistence. Physical Dial input and live Undo/Redo shortcuts remain
@@ -206,7 +229,9 @@ The temporary copy was removed with Undo Create Virtual Copy afterward.
 These checks used keyboard input; physical Dial input remains unverified.
 
 Physical Dial validation and live focus/Space behavior remain unverified for
-this build. At each Wheel Sensitivity, verify one felt click per menu selection
+this build. With First Item selected, confirm the picker starts on Scroll after
+choosing other general or Lightroom modes, and that one and two clockwise clicks
+highlight Playback and Zoom without looking. At each Wheel Sensitivity, verify one felt click per menu selection
 in both directions, wraparound, Lightroom group transitions, and normal sensitivity
 after dismissal. On Lightroom Classic 15.6, check next/previous navigation with Crop
 open, fine adjustment step size, Before view, Remove size and Q toggling Remove,

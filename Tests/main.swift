@@ -263,6 +263,127 @@ do {
 
 check(Harness().input.menuPressDuration == .ms600, "Existing users retain the 600 ms default")
 
+check(Harness().input.radialMenuStartPosition == .lastSelected,
+      "Existing users retain the last-selected opening behavior")
+
+do {
+    let suite = "MacDial.RadialMenuStartPositionTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    check(RadialMenuStartPosition.load(from: defaults) == .lastSelected,
+          "Missing starting-position preference defaults to Last Selected")
+    defaults.set("zoom", forKey: "mode")
+    defaults.set("lightroomFineTune", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
+    for option in RadialMenuStartPosition.allCases {
+        option.save(to: defaults)
+        check(RadialMenuStartPosition.load(from: UserDefaults(suiteName: suite)!) == option,
+              "Each starting-position preference survives a fresh defaults instance")
+    }
+    check(defaults.string(forKey: "mode") == "zoom"
+          && defaults.string(forKey: "appMode." + AppProfile.lightroom.bundleIdentifier) == "lightroomFineTune",
+          "Saving the starting position preserves general and app-specific mode preferences")
+    for invalid: Any in ["", "unknown", 42, true, ["firstItem"]] {
+        defaults.set(invalid, forKey: "radialMenuStartPosition")
+        check(RadialMenuStartPosition.load(from: defaults) == .lastSelected,
+              "Invalid starting-position preferences fall back to Last Selected")
+    }
+}
+
+// Both policies open independently of the active mode, including app modes.
+for profile: AppProfile? in [nil, .lightroom] {
+    let modes = profile?.availableModes ?? Mode.generalModes
+    for mode in modes {
+        for option in RadialMenuStartPosition.allCases {
+            let h = Harness()
+            h.profile = profile
+            h.mode = mode
+            h.savedMode = mode.savedValue
+            h.input.radialMenuStartPosition = option
+            h.report(.pressed)
+            h.clock.advance(h.input.menuPressDuration.seconds)
+            let expected = option == .firstItem ? modes[0] : mode
+            check(h.input.picker?.selectedMode == expected && h.input.picker?.isArmed == false,
+                  "Opening highlights the configured choice before release")
+            h.report(.pressed, .Clockwise(1))
+            h.input.confirmSelection()
+            check(h.input.picker?.selectedMode == expected && h.commits.isEmpty,
+                  "The opening hold cannot navigate or confirm either starting policy")
+            h.report(.released, .Clockwise(1))
+            check(h.input.picker?.selectedMode == expected && h.input.picker?.isArmed == true,
+                  "Release arms the configured choice without advancing it")
+            h.report(.released, .Clockwise(1))
+            check(h.input.picker?.selectedMode == expected.advanced(by: 1, in: modes),
+                  "The first navigation tick advances from the configured starting choice")
+            h.input.cancel()
+            check(h.mode == mode && h.savedMode == mode.savedValue && h.commits.isEmpty,
+                  "Opening, browsing and cancelling preserve the active and saved modes")
+            check(h.clicks == 0 && h.rotations.isEmpty,
+                  "Starting-position selection never leaks a mode action")
+        }
+
+        for ticks in 0...3 {
+            let h = Harness()
+            h.profile = profile
+            h.mode = mode
+            h.savedMode = mode.savedValue
+            h.input.radialMenuStartPosition = .firstItem
+            h.open()
+            for _ in 0..<ticks { h.report(.released, .Clockwise(1)) }
+            check(h.input.picker?.selectedMode == Mode.generalModes[ticks] && h.mode == mode,
+                  "Zero through three clockwise ticks predictably highlight the general choices")
+            h.click()
+            check(h.commits == [Mode.generalModes[ticks]] && h.savedMode == Mode.generalModes[ticks].savedValue,
+                  "A short click confirms and saves the counted choice")
+            h.open()
+            check(h.input.picker?.selectedMode == .scrolling,
+                  "First Item resets the next opening after confirming any counted choice")
+            h.input.cancel()
+        }
+    }
+
+    for sensitivity in [WheelSensitivity.low, .medium, .high, .extreme] {
+        for direction in [-1, 1] {
+            let h = Harness()
+            h.profile = profile
+            h.mode = modes.last!
+            h.configuration.update(sensitivity: sensitivity)
+            h.input.radialMenuStartPosition = .firstItem
+            h.open()
+            let openingFeedback = h.feedback
+            h.report(.released, .CounterClockwise(1), direction: direction)
+            check(h.input.picker?.selectedMode == modes.last,
+                  "Reverse navigation from First Item wraps at every sensitivity and scroll direction")
+            for expected in modes {
+                h.report(.released, .Clockwise(1), direction: direction)
+                check(h.input.picker?.selectedMode == expected,
+                      "Each tick follows the selectable order, including Lightroom children")
+            }
+            check(h.feedback == openingFeedback && h.configurations.last?.haptics == true,
+                  "First Item preserves hardware haptics without adding software rotation feedback")
+            h.input.cancel()
+        }
+    }
+}
+
+for (original, updated) in [(RadialMenuStartPosition.lastSelected, RadialMenuStartPosition.firstItem),
+                            (.firstItem, .lastSelected)] {
+    let h = Harness()
+    h.mode = .zoom
+    h.input.radialMenuStartPosition = original
+    h.open()
+    h.input.highlight(.playback)
+    let presentations = h.presentations
+    let feedback = h.feedback
+    h.input.radialMenuStartPosition = updated
+    check(h.input.picker?.selectedMode == .playback && h.presentations == presentations && h.feedback == feedback,
+          "Changing the preference leaves an open picker's highlight and feedback untouched")
+    h.input.cancel()
+    h.open()
+    check(h.input.picker?.selectedMode == (updated == .firstItem ? .scrolling : .zoom),
+          "The next opening applies the updated preference in either direction")
+    h.input.cancel()
+}
+
 do {
     let suite = "MacDial.MenuPressDurationTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!

@@ -1,15 +1,35 @@
 import Foundation
 
+enum RadialMenuStartPosition: String, CaseIterable {
+    case lastSelected
+    case firstItem
+
+    static func load(from defaults: UserDefaults = .standard) -> RadialMenuStartPosition {
+        let raw = defaults.string(forKey: "radialMenuStartPosition") ?? ""
+        return RadialMenuStartPosition(rawValue: raw) ?? .lastSelected
+    }
+
+    func save(to defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: "radialMenuStartPosition")
+    }
+}
+
 struct ModePickerState {
     private(set) var selectedMode: Mode
     let profile: AppProfile?
     let availableModes: [Mode]
     var isArmed = false
 
-    init(selectedMode: Mode, profile: AppProfile? = nil) {
+    init(selectedMode: Mode, profile: AppProfile? = nil,
+         startPosition: RadialMenuStartPosition = .lastSelected) {
         self.profile = profile
         availableModes = profile?.availableModes ?? Mode.generalModes
-        self.selectedMode = availableModes.contains(selectedMode) ? selectedMode : .scrolling
+        switch startPosition {
+        case .lastSelected:
+            self.selectedMode = availableModes.contains(selectedMode) ? selectedMode : .scrolling
+        case .firstItem:
+            self.selectedMode = availableModes.first ?? .scrolling
+        }
     }
 
     @discardableResult

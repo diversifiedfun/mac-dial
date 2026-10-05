@@ -83,6 +83,12 @@ extension NSMenu {
             items.menuPressDuration.submenu?.addItem(option)
         }
         self.addItem(items.menuPressDuration)
+
+        items.radialMenuStartPosition.submenu = NSMenu()
+        for option in items.radialMenuStartPositionOptions {
+            items.radialMenuStartPosition.submenu?.addItem(option)
+        }
+        self.addItem(items.radialMenuStartPosition)
         
         items.scrollDirection.submenu = NSMenu.init()
         for scrollDirectionOption in items.scrollDirectionOptions {
@@ -145,6 +151,11 @@ class StatusBarController
         let menuPressDurationOptions = MenuPressDuration.allCases.map {
             MenuOptionItem(title: "\($0.rawValue) ms", option: $0)
         }
+        let radialMenuStartPosition = NSMenuItem(title: "Radial Menu Starts At")
+        let radialMenuStartPositionOptions = [
+            MenuOptionItem<RadialMenuStartPosition>(title: "Last Selected", option: .lastSelected),
+            MenuOptionItem<RadialMenuStartPosition>(title: "First Item", option: .firstItem)
+        ]
         let scrollDirection = NSMenuItem.init(title: "Scroll Direction")
         let scrollDirectionOptions = [
             MenuOptionItem<ScrollDirection>.init(title: "Standard", option: .standard),
@@ -187,6 +198,17 @@ class StatusBarController
         set {
             input.menuPressDuration = newValue
             for option in menuItems.menuPressDurationOptions {
+                option.selected = option.option == newValue
+            }
+            newValue.save()
+        }
+    }
+
+    var radialMenuStartPosition: RadialMenuStartPosition {
+        get { RadialMenuStartPosition.load() }
+        set {
+            input.radialMenuStartPosition = newValue
+            for option in menuItems.radialMenuStartPositionOptions {
                 option.selected = option.option == newValue
             }
             newValue.save()
@@ -276,6 +298,17 @@ class StatusBarController
             option.action = #selector(setMenuPressDuration(sender:))
         }
         menuPressDuration = menuPressDuration // restore timing and the checkmark at launch
+
+        for option in menuItems.radialMenuStartPositionOptions {
+            option.target = self
+            option.action = #selector(setRadialMenuStartPosition(sender:))
+            if option.option == .firstItem {
+                let help = "Always highlight the first menu item when opening, so you can navigate by touch."
+                option.toolTip = help
+                option.setAccessibilityHelp(help)
+            }
+        }
+        radialMenuStartPosition = radialMenuStartPosition // restore the opening choice and checkmark
         
         for option in menuItems.scrollDirectionOptions {
             option.target = self
@@ -471,6 +504,11 @@ class StatusBarController
     @objc func setMenuPressDuration(sender: AnyObject) {
         let item = sender as! MenuOptionItem<MenuPressDuration>
         menuPressDuration = item.option
+    }
+
+    @objc func setRadialMenuStartPosition(sender: AnyObject) {
+        let item = sender as! MenuOptionItem<RadialMenuStartPosition>
+        radialMenuStartPosition = item.option
     }
     
     @objc func setHaptics(sender: AnyObject) {

@@ -116,7 +116,7 @@ for (sensitivity, normal, menu) in [(WheelSensitivity.low, 18, 12), (.medium, 36
     h.click()
     check(h.feedback == openingFeedback + 3, "Confirmation retains its software haptic")
     check(h.configurations.last?.ticksPerRevolution == normal, "Confirmation restores normal sensitivity")
-    for profile: AppProfile? in [nil, .lightroom] {
+    for profile: AppProfile? in [nil, .lightroom, .editwall] {
         h.profile = profile
         h.open()
         check(h.configurations.last?.ticksPerRevolution == menu, "Choice count does not change menu spacing")
@@ -290,7 +290,7 @@ do {
 }
 
 // Both policies open independently of the active mode, including app modes.
-for profile: AppProfile? in [nil, .lightroom] {
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
     let modes = profile?.availableModes ?? Mode.generalModes
     for mode in modes {
         for option in RadialMenuStartPosition.allCases {
@@ -816,7 +816,7 @@ for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, p
     default: preconditionFailure("General controllers only")
     }
 }
-for profile: AppProfile? in [nil, .lightroom] {
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
     for duration in MenuPressDuration.allCases {
         historyKeys.removeAll()
         let h = Harness()
@@ -1197,4 +1197,139 @@ do {
     controller.onRotate(.Clockwise(5), 1)
     check(events.map(\.type) == [.keyDown, .keyUp], "Focus change during a batch completes its pair and stops subsequent shortcuts")
 }
+
+// Sequence uses real routing with recorded key events, never desktop input.
+final class SequenceHarness {
+    let routing = Harness()
+    var foreground: pid_t? = 42
+    var events: [CGEvent] = []
+    lazy var controller = EditwallSequenceController(
+        now: { [unowned self] in self.routing.clock.time }, doubleClickInterval: { 0.5 },
+        schedule: { [unowned self] in self.routing.clock.schedule($0, $1) },
+        targetProcess: { [unowned self] in self.foreground },
+        post: { [unowned self] event, _ in self.events.append(event) })
+    init() {
+        routing.profile = .editwall
+        routing.mode = .editwallSequence
+        routing.input.onPressBegan = { [unowned self] in self.controller.onPressBegan() }
+        routing.input.onShortPress = { [unowned self] in self.controller.onDown(); self.controller.onUp() }
+        routing.input.onCancelAction = { [unowned self] in self.controller.onCancel() }
+        routing.input.onRotation = { [unowned self] in self.controller.onRotate($0, $1) }
+    }
+    func expect(_ keys: [Int], _ message: String) {
+        check(events.count == keys.count * 2 && events.enumerated().allSatisfy { index, event in
+            event.getIntegerValueField(.keyboardEventKeycode) == Int64(keys[index / 2])
+                && event.flags.isEmpty && event.type == (index % 2 == 0 ? .keyDown : .keyUp)
+        }, message)
+    }
+}
+for direction in [-1, 1] {
+    let c = SequenceHarness()
+    c.routing.report(.released, .CounterClockwise(2), direction: direction)
+    c.routing.report(.released, .Clockwise(3), direction: direction)
+    c.expect([kVK_UpArrow, kVK_UpArrow, kVK_DownArrow, kVK_DownArrow, kVK_DownArrow],
+             "Sequence left/right sends one unmodified Up/Down pair per tick, independent of scroll preference")
+    c.events.removeAll()
+    c.routing.report(.released, .Clockwise(0))
+    c.routing.report(.released, .CounterClockwise(-1))
+    c.expect([], "Invalid Sequence tick counts do nothing")
+}
+do {
+    let c = SequenceHarness()
+    c.routing.click()
+    c.expect([], "Next slot waits for the double-click window")
+    c.routing.clock.advance(0.5)
+    c.expect([kVK_RightArrow], "Single click advances exactly one sequence slot")
+}
+do {
+    let c = SequenceHarness()
+    c.routing.click()
+    c.routing.clock.advance(0.1)
+    c.routing.click()
+    c.routing.clock.advance(1)
+    c.expect([kVK_LeftArrow], "Double click goes back one slot without first advancing")
+    c.routing.click()
+    c.routing.clock.advance(0.5)
+    c.expect([kVK_LeftArrow, kVK_RightArrow], "A fresh single click works after a double click")
+}
+for duration in MenuPressDuration.allCases {
+    let c = SequenceHarness()
+    c.routing.input.menuPressDuration = duration
+    c.routing.click()
+    c.routing.report(.pressed)
+    c.routing.clock.advance(duration.seconds)
+    c.routing.report(.released)
+    c.routing.clock.advance(1)
+    c.expect([], "Click then hold cancels navigation at every menu press duration")
+    check(c.routing.input.picker != nil, "Holding Sequence opens its picker")
+    c.routing.input.highlight(.editwallSequence)
+    c.routing.click()
+    c.routing.clock.advance(1)
+    c.expect([], "Picker confirmation never navigates a sequence")
+}
+do {
+    let c = SequenceHarness()
+    c.routing.click()
+    c.routing.report(.released, .Clockwise(1))
+    c.routing.clock.advance(1)
+    c.expect([kVK_DownArrow], "Rotation cancels a delayed slot change")
+}
+for newPID: pid_t? in [84, nil] {
+    let c = SequenceHarness()
+    c.routing.click()
+    c.foreground = newPID
+    c.routing.clock.advance(1)
+    c.expect([], "Focus change discards the delayed Sequence click")
+}
+do {
+    let c = SequenceHarness()
+    c.routing.click()
+    c.routing.input.cancel()
+    c.routing.clock.advance(1)
+    c.expect([], "Disconnect, mode changes and other cancellation discard Sequence clicks")
+    c.foreground = nil
+    c.routing.click()
+    c.routing.report(.released, .Clockwise(3))
+    c.routing.clock.advance(1)
+    c.expect([], "No Sequence shortcuts are emitted without an eligible target")
+}
+for rotation: Dial.Rotation in [.Clockwise(5), .CounterClockwise(5)] {
+    var foreground: pid_t? = 42
+    var events: [CGEvent] = []
+    var destinations: [pid_t] = []
+    let controller = EditwallSequenceController(targetProcess: { foreground }, post: { event, pid in
+        events.append(event)
+        destinations.append(pid)
+        foreground = 84
+    })
+    controller.onRotate(rotation, 1)
+    check(events.map(\.type) == [.keyDown, .keyUp] && destinations == [42, 42],
+          "Sequence finishes the original key pair and stops its batch on a focus change")
+}
+do {
+    let suite = "MacDial.SequenceTests." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let context = AppModeContext(defaults: defaults)
+    context.select(.zoom)
+    context.activate(bundleIdentifier: "com.editwall.desktop")
+    check(context.profile == .editwall && context.currentMode == .zoom, "Editwall initially inherits the general choice")
+    check(context.select(.editwallSequence), "Sequence is selectable in Editwall")
+    let relaunched = AppModeContext(defaults: defaults)
+    relaunched.activate(bundleIdentifier: "com.editwall.desktop")
+    check(relaunched.currentMode == .editwallSequence, "Sequence survives relaunch")
+    context.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+    check(context.currentMode == .zoom && !context.select(.editwallSequence), "Sequence is unavailable in Lightroom")
+    context.select(.lightroomCrop)
+    context.activate(bundleIdentifier: nil)
+    check(context.currentMode == .zoom && !context.select(.editwallSequence), "Leaving Editwall preserves the general choice")
+    context.activate(bundleIdentifier: "com.editwall.desktop")
+    check(context.currentMode == .editwallSequence, "Returning restores Sequence independently of Lightroom")
+    check(!context.select(.lightroomCrop), "Editwall cannot select Lightroom modes")
+}
+let sequenceLayout = RadialMenuLayout(profile: .editwall)
+let sequenceSegment = sequenceLayout.segment(for: .editwallSequence)!
+check(sequenceLayout.mode(at: sequenceLayout.point(angle: sequenceSegment.angle, radius: sequenceSegment.iconRadius)) == .editwallSequence,
+      "Sequence outer icon hits the Sequence mode")
+check(AppProfile.editwall.availableModes == Mode.generalModes + [.editwallSequence], "Editwall has four general modes and one Sequence submode")
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

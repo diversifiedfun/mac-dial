@@ -58,7 +58,6 @@ final class RadialMenuView: NSView {
         appGroup.setAccessibilityElement(true)
         appGroup.setAccessibilityRole(.group)
         appGroup.setAccessibilityLabel("Lightroom modes")
-        appGroup.setAccessibilityHelp("Three modes available while Lightroom Classic is active")
         addSubview(appGroup)
         appIcon.imageScaling = .scaleProportionallyDown
         appIcon.setAccessibilityElement(false)
@@ -99,6 +98,7 @@ final class RadialMenuView: NSView {
         appGroup.frame = bounds
         appGroup.isHidden = menuLayout.profile == nil
         appGroup.setAccessibilityLabel("\(menuLayout.profile?.title ?? "App") modes")
+        appGroup.setAccessibilityHelp(menuLayout.profile.map { "\($0.modes.count) modes available while \($0.title) is active" })
         if let profile = menuLayout.profile, let group = menuLayout.appGroupSegment {
             appIcon.image = applicationIcon(for: profile)
             let p = menuLayout.point(angle: group.angle, radius: group.iconRadius)
@@ -121,8 +121,8 @@ final class RadialMenuView: NSView {
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityLabel("\(mode.title) mode")
             button.toolTip = mode.usageHelp
-            button.setAccessibilityHelp((mode.isLightroom
-                ? "Lightroom. \(mode.turnHint). \(mode.clickHint). Turn to choose; click to select."
+            button.setAccessibilityHelp((menuLayout.profile?.modes.contains(mode) == true
+                ? "\(menuLayout.profile!.title). \(mode.turnHint). \(mode.clickHint). Turn to choose; click to select."
                 : "Select \(mode.title) for the Surface Dial")
                     + (mode.usageHelp.map { " " + $0 } ?? ""))
             if menuLayout.profile?.modes.contains(mode) == true { appGroup.addSubview(button) }
@@ -143,6 +143,9 @@ final class RadialMenuView: NSView {
         // Launch Services lookup can be unavailable in offscreen inspection.
         if profile == .lightroom {
             candidates.append(URL(fileURLWithPath: "/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app"))
+        }
+        if profile == .editwall {
+            candidates.append(URL(fileURLWithPath: "/Applications/Edit Wall.app"))
         }
         for url in candidates {
             guard let bundle = Bundle(url: url), bundle.bundleIdentifier == profile.bundleIdentifier,

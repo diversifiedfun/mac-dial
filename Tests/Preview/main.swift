@@ -38,7 +38,7 @@ final class PreviewDelegate: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.button?.title = "Dial Preview"
         let actions = NSMenu()
-        for profile: AppProfile? in [nil, .lightroom] {
+        for profile: AppProfile? in [nil, .lightroom, .editwall] {
             for mode in profile?.availableModes ?? Mode.generalModes {
                 let item = NSMenuItem(title: "\(profile?.title ?? "General"): \(mode.title)", action: #selector(openMode(_:)), keyEquivalent: "")
                 item.target = self

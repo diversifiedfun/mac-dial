@@ -12,7 +12,7 @@ You can find universal builds of the app under "releases". Note that these build
 
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
-The app supports four general modes, plus contextual Lightroom Classic modes:
+The app supports four general modes, plus contextual Lightroom Classic and Editwall modes:
 * Scroll mode: Turning the dial will result in scrolling. A short press clicks at the current cursor position when released. Press-and-hold dragging is not supported.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
@@ -22,8 +22,7 @@ Single-click Undo waits for the macOS double-click interval. A second short
 press begun within that interval sends only one Redo, with no preliminary Undo.
 A second hold cancels the waiting click and opens the picker. Rotation remains
 immediate and cancels any waiting click; changing modes or apps, disconnecting,
-and other input cancellations also discard it. These click timings apply only
-to Undo/Redo mode. Picker confirmation still uses one immediate short click.
+and other input cancellations also discard it. These click timings apply to Undo/Redo and Editwall Sequence modes. Picker confirmation still uses one immediate short click.
 
 Undo/Redo sends complete key-down/key-up pairs to the foreground process. If
 focus changes during a rotation batch, the started pair finishes in the original
@@ -54,8 +53,8 @@ highlight Undo/Redo. Click to confirm. Opening, browsing, and cancelling leave
 the active mode unchanged. Each opening starts from the first item again, even
 after confirming another mode. Enable Haptics to feel each selection step.
 
-This preference is saved across launches and applies to both the general and
-Lightroom menus. It takes effect on the next opening, without moving an already
+This preference is saved across launches and applies to the general,
+Lightroom, and Editwall menus. It takes effect on the next opening, without moving an already
 open menu's highlight. First Item follows the selectable menu order if that
 order changes in a future version; it does not override saved app-specific modes.
 
@@ -97,6 +96,31 @@ The wheel uses SF Symbols, a dark translucent material, and a blue selection
 arc. Its native controls expose mode labels and selected state to accessibility.
 Reduce Transparency uses an opaque surface; Increase Contrast strengthens
 boundaries; Reduce Motion disables the opening fade.
+
+### Editwall modes
+
+When **Edit Wall is the foreground app** (`com.editwall.desktop`), choose
+**Editwall → Sequence** in the menu bar or select Sequence on the radial picker's
+Editwall outer arc. Open the Sequence view in Editwall before using this mapping.
+
+| Sequence gesture | Shortcut | Action |
+| --- | --- | --- |
+| Rotate left (counterclockwise) | Up arrow | Previous candidate |
+| Rotate right (clockwise) | Down arrow | Next candidate |
+| Single click | Right arrow | Next sequence slot |
+| Double click | Left arrow | Previous sequence slot |
+
+Each rotation tick sends one unmodified arrow key. Scroll Direction does not
+reverse these actions. Single clicks wait for the macOS double-click interval;
+a double click sends only Left, with no preliminary Right. Holding opens the
+picker. A second hold, rotation, focus change, disconnect, or mode change cancels
+any waiting click. Picker confirmation does not navigate the sequence.
+
+Editwall remembers its last selected mode under `appMode.com.editwall.desktop`,
+independently of the general and Lightroom choices. On first use, select Sequence
+explicitly. This mapping sends shortcuts; it does not switch Editwall's view or
+inspect its active text field. Physical Dial behavior in Editwall still needs a
+live check.
 
 ### Lightroom Classic modes
 
@@ -148,9 +172,8 @@ Each Lightroom shortcut rechecks the foreground app, then sends both key edges
 to that Lightroom process so its release cannot spill into another application.
 
 Initial support targets **Lightroom Classic** (`com.adobe.LightroomClassicCC7`)
-and the U.S. keyboard layout. Cloud Lightroom and other app profiles are not
-included. Merely keeping Lightroom open in the background does not enable its
-modes. Outside Lightroom the original three-mode wheel returns.
+and the U.S. keyboard layout. Cloud Lightroom is not included. Merely keeping Lightroom open in the background does not enable its
+modes. Outside supported apps the four-mode general wheel returns.
 
 If you want to app to run at startup you will need to add it yourself to the "login items" for your user.
 
@@ -191,25 +214,25 @@ require removing and re-adding it under Privacy & Security > Accessibility
   normalization, preference compatibility, multi-display placement, and actual
   controller events recorded without posting input to the desktop.
 - `bash Tests/render.sh` checks the native view's accessibility and input handlers
-  and exports all general and Lightroom selections, opening states, and
+  and exports all general, Lightroom, and Editwall selections, opening states, and
   opaque/high-contrast fallbacks under `../build/radial-render/images/`.
-  General exports are 600×600 pixels and Lightroom exports are 864×864 at 2×.
+  General exports are 600×600 pixels and contextual exports are 864×864 at 2×.
   The renderer explicitly uses 2× backing so SF Symbols remain sharp even when
   the desktop is locked or a Retina screen is unavailable.
 - `bash Tests/preview.sh` builds and opens **Mac Dial Preview**, a separate
   hardware-free app using the production picker and gesture router. Its menu-bar
-  item previews either the general or Lightroom layout and every selection.
+  item previews the general, Lightroom, or Editwall layout and every selection.
   It opens initially on Crop & Browse. It never opens the HID device, posts system input,
   requests permissions, or changes saved modes. Only this inspection preview
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The configurable radial-start Release build, strict code-signature verification,
-1,048 recording-only behavior checks, and 546 native-view checks pass.
+The Editwall Sequence Release build, strict code-signature verification,
+1,289 recording-only behavior checks, and 752 native-view checks pass.
 The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure
-recovery, restoration after dismissal, haptic suppression, queued rotation, all seven
+recovery, restoration after dismissal, haptic suppression, queued rotation, all eight
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
 text fit, nonoverlapping pointer targets, and placement on displays with negative

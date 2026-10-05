@@ -70,6 +70,9 @@ extension NSMenu {
         items.lightroom.submenu = NSMenu()
         for item in items.lightroomModes { items.lightroom.submenu?.addItem(item) }
         self.addItem(items.lightroom)
+        items.editwall.submenu = NSMenu()
+        for item in items.editwallModes { items.editwall.submenu?.addItem(item) }
+        self.addItem(items.editwall)
         self.addItem(items.separator2)
         
         items.wheelSensitivity.submenu = NSMenu.init()
@@ -138,7 +141,10 @@ class StatusBarController
         let lightroomModes = AppProfile.lightroom.modes.map {
             ControllerOptionItem(title: $0.title, mode: $0, controller: LightroomController(mode: $0))
         }
-        var allModeItems: [ControllerOptionItem] { modeItems + lightroomModes }
+        let editwall = NSMenuItem(title: "Editwall")
+        let editwallModes = [ControllerOptionItem(title: Mode.editwallSequence.title,
+                                                  mode: .editwallSequence, controller: EditwallSequenceController())]
+        var allModeItems: [ControllerOptionItem] { modeItems + lightroomModes + editwallModes }
         let separator2 = NSMenuItem.separator()
         let wheelSensitivity = NSMenuItem.init(title: "Wheel Sensitivity")
         let wheelSensitivityOptions = [
@@ -435,7 +441,9 @@ class StatusBarController
     
     private func refreshModeUI() {
         for item in menuItems.allModeItems { item.selected = item.option == currentMode }
-        menuItems.lightroom.isHidden = modeContext.profile == nil
+        menuItems.lightroom.isHidden = modeContext.profile != .lightroom
+        menuItems.editwall.isHidden = modeContext.profile != .editwall
+        menuItems.editwall.state = currentMode == .editwallSequence ? .on : .off
         menuItems.lightroom.state = currentMode.isLightroom ? .on : .off
         updateIcon()
     }

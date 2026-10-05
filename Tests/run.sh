@@ -7,6 +7,6 @@ xcrun swiftc -module-cache-path "$test_build/module-cache" \
     MacDial/Controller.swift MacDial/DialButtonHandler.swift MacDial/Mode.swift \
     MacDial/DialConfiguration.swift MacDial/ModePickerState.swift MacDial/DialInputCoordinator.swift \
     MacDial/RadialMenuLayout.swift MacDial/RadialMenuView.swift MacDial/PlaybackController.swift \
-    MacDial/ScrollController.swift MacDial/ZoomController.swift MacDial/UndoRedoController.swift MacDial/LightroomController.swift MacDial/AppModeContext.swift Tests/main.swift \
+    MacDial/ScrollController.swift MacDial/ZoomController.swift MacDial/UndoRedoController.swift MacDial/EditwallSequenceController.swift MacDial/LightroomController.swift MacDial/AppModeContext.swift Tests/main.swift \
     -o "$test_build/controller-tests"
 "$test_build/controller-tests"

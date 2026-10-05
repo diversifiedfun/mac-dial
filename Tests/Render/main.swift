@@ -52,13 +52,13 @@ func update(_ state: ModePickerState) {
     view.update(state)
 }
 
-for profile: AppProfile? in [nil, .lightroom] {
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
     let modes = profile?.availableModes ?? Mode.generalModes
     for mode in modes {
         var state = ModePickerState(selectedMode: mode, profile: profile)
         state.isArmed = true
         update(state)
-        try render((profile == nil ? "" : "lightroom-") + mode.rawValue)
+        try render((profile.map { $0.title.lowercased() + "-" } ?? "") + mode.rawValue)
         let controls = buttons(in: view)
         check(controls.count == modes.count, "Only selectable modes expose native controls")
         for button in controls {
@@ -95,19 +95,19 @@ for profile: AppProfile? in [nil, .lightroom] {
             check(visibleLabels.map(\.stringValue) == ["Undo/Redo", "Turn to choose", "Click to select"],
                   "Undo/Redo's center explains picker navigation rather than triggering history actions")
         }
-        if profile != nil {
-            let group = view.subviews.first { $0.accessibilityRole() == .group && $0.accessibilityLabel() == "Lightroom modes" }
-            check(group != nil && buttons(in: group!).count == 3, "Lightroom children have an accessible group")
+        if let profile = profile {
+            let group = view.subviews.first { $0.accessibilityRole() == .group && $0.accessibilityLabel() == "\(profile.title) modes" }
+            check(group != nil && buttons(in: group!).count == profile.modes.count, "App-specific children have an accessible group")
         }
     }
 }
 
-for profile: AppProfile? in [nil, .lightroom] {
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
     var state = ModePickerState(selectedMode: .undoRedo, profile: profile)
     state.isArmed = true
     update(state)
     view.updateDisplayOptions(reduceTransparency: true, increasedContrast: true)
-    try render((profile == nil ? "" : "lightroom-") + "undoRedo-reduced-transparency-contrast")
+    try render((profile.map { $0.title.lowercased() + "-" } ?? "") + "undoRedo-reduced-transparency-contrast")
 }
 view.updateDisplayOptions(reduceTransparency: false, increasedContrast: false)
 update(ModePickerState(selectedMode: .scrolling))
@@ -194,4 +194,4 @@ check(didCancel, "Empty space outside the partial outer ring cancels")
 update(ModePickerState(selectedMode: .zoom))
 check(view.bounds.width == 300 && buttons(in: view).count == Mode.generalModes.count,
       "Leaving app context restores the standard size and choices")
-print("Passed \(checks) native view checks; rendered general and Lightroom states to \(destination.path)")
+print("Passed \(checks) native view checks; rendered general, Lightroom and Editwall states to \(destination.path)")

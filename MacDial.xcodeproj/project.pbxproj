@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		F01200000000000000000002 /* UndoRedoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200000000000000000001 /* UndoRedoController.swift */; };
+		F01300000000000000000002 /* EditwallSequenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01300000000000000000001 /* EditwallSequenceController.swift */; };
 		C882FA1A26F1430C00595EE1 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C882FA1926F1430C00595EE1 /* AppDelegate.swift */; };
 		C882FA1E26F1430D00595EE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C882FA1D26F1430D00595EE1 /* Assets.xcassets */; };
 		C882FA2126F1430D00595EE1 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C882FA2026F1430D00595EE1 /* Preview Assets.xcassets */; };
@@ -35,6 +36,7 @@
 
 /* Begin PBXFileReference section */
 		F01200000000000000000001 /* UndoRedoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoRedoController.swift; sourceTree = "<group>"; };
+		F01300000000000000000001 /* EditwallSequenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditwallSequenceController.swift; sourceTree = "<group>"; };
 		C882FA1626F1430C00595EE1 /* MacDial.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacDial.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C882FA1926F1430C00595EE1 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C882FA1D26F1430D00595EE1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -104,6 +106,7 @@
 				F00100000000000000000001 /* DialButtonHandler.swift */,
 				F00200000000000000000001 /* ZoomController.swift */,
 				F01200000000000000000001 /* UndoRedoController.swift */,
+				F01300000000000000000001 /* EditwallSequenceController.swift */,
 				F00700000000000000000001 /* RadialMenuController.swift */,
 				F01000000000000000000001 /* RadialMenuLayout.swift */,
 				F00900000000000000000001 /* LightroomController.swift */,
@@ -219,6 +222,7 @@
 				F00100000000000000000002 /* DialButtonHandler.swift in Sources */,
 				F00200000000000000000002 /* ZoomController.swift in Sources */,
 				F01200000000000000000002 /* UndoRedoController.swift in Sources */,
+				F01300000000000000000002 /* EditwallSequenceController.swift in Sources */,
 				F00700000000000000000002 /* RadialMenuController.swift in Sources */,
 				F01000000000000000000002 /* RadialMenuLayout.swift in Sources */,
 				F00900000000000000000002 /* LightroomController.swift in Sources */,

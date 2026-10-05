@@ -129,27 +129,10 @@ class Dial
         }
         
         private func parse(bytes: UnsafeMutableBufferPointer<UInt8>) -> InputReport {
-            switch bytes[0] {
-            case 1 where bytes.count >= 4:
-                
-                let buttonState = bytes[1]&1 == 1 ? ButtonState.pressed : .released
-                
-                let rotation = { () -> Rotation? in
-                    switch bytes[2] {
-                        case 1:
-                            return .Clockwise(1)
-                        case 0xff:
-                            return .CounterClockwise(1)
-                        default:
-                            return nil
-                }}()
-                
-                return .dial(buttonState, rotation)
-            default:
-                return .unknown
-            }
+            guard let report = DialReportDecoder.decode(Array(bytes)) else { return .unknown }
+            return .dial(report.button, report.rotation)
         }
-        
+
         func read() -> InputReport?
         {
             ioLock.lock(); defer { ioLock.unlock() }
@@ -168,9 +151,6 @@ class Dial
             }
             
             let array = UnsafeMutableBufferPointer(start: readBuffer.pointer, count: Int(readBytes))
-            
-            let dataStr = array.map({ String(format:"%02X", $0)}).joined(separator: " ")
-            print("Read data from device: \(dataStr)")
             
             return parse(bytes: array)
         }

@@ -4,7 +4,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 test_build="../build/controller-tests"
 mkdir -p "$test_build/module-cache"
 xcrun swiftc -module-cache-path "$test_build/module-cache" \
-    MacDial/Controller.swift MacDial/DialButtonHandler.swift MacDial/Mode.swift \
+    MacDial/Controller.swift MacDial/DialButtonHandler.swift MacDial/Mode.swift MacDial/DialReportDecoder.swift \
     MacDial/DialConfiguration.swift MacDial/ModePickerState.swift MacDial/DialInputCoordinator.swift \
     MacDial/RadialMenuLayout.swift MacDial/RadialMenuView.swift MacDial/PlaybackController.swift \
     MacDial/ScrollController.swift MacDial/ZoomController.swift MacDial/UndoRedoController.swift MacDial/EditwallSequenceController.swift MacDial/LightroomController.swift MacDial/AppModeContext.swift Tests/main.swift \

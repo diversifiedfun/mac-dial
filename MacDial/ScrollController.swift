@@ -2,34 +2,43 @@ import AppKit
 
 // Independent of Mode: Scroll remains one choice in the radial menu.
 enum ScrollStyle: String, CaseIterable {
-    case smooth, stepped, freewheel
+    case stepped
+    // Preserve preference values saved by earlier versions.
+    case freestyle = "freewheel"
+    case precision = "smooth"
 
     var title: String {
         switch self {
-        case .smooth: return "Smooth"
         case .stepped: return "Stepped"
-        case .freewheel: return "Freewheel"
+        case .freestyle: return "Freestyle"
+        case .precision: return "Precision"
         }
     }
 
     var next: ScrollStyle {
         switch self {
-        case .smooth: return .stepped
-        case .stepped: return .freewheel
-        case .freewheel: return .smooth
+        case .stepped: return .freestyle
+        case .freestyle: return .precision
+        case .precision: return .stepped
         }
     }
 
-    // Freewheel keeps slow-tick precision but accelerates faster turns more
+    // Freestyle keeps slow-tick precision but accelerates faster turns more
     // strongly and dissipates their momentum over a longer, bounded coast.
-    fileprivate var maximumPixelsPerTick: Double { self == .freewheel ? 144 : 96 }
-    fileprivate var coastDuration: TimeInterval { self == .freewheel ? 1.0 : 0.30 }
-    fileprivate var decay: TimeInterval { self == .freewheel ? 0.25 : 0.075 }
-    fileprivate var coastVelocityScale: Double { self == .freewheel ? 0.5 : 0.25 }
-    fileprivate var maximumCoastVelocity: Double { self == .freewheel ? 2400 : 1200 }
+    fileprivate var maximumPixelsPerTick: Double { self == .freestyle ? 144 : 96 }
+    fileprivate var coastDuration: TimeInterval { self == .freestyle ? 1.2 : 0.60 }
+    fileprivate var maximumCoastVelocity: Double { self == .freestyle ? 2400 : 1200 }
+    // Medium reports one tick per 10 degrees. Freestyle must recognize a
+    // comfortable sustained turn even when its ticks are over 100 ms apart.
+    fileprivate var gestureTimeout: TimeInterval { self == .freestyle ? 0.22 : 0.10 }
+    fileprivate var speedResponse: TimeInterval { self == .freestyle ? 0.08 : 0.12 }
+    fileprivate var accelerationStart: Double { self == .freestyle ? 2 : 8 }
+    fileprivate var accelerationRange: Double { self == .freestyle ? 16 : 40 }
+    fileprivate var accelerationExponent: Double { self == .freestyle ? 1.5 : 2 }
+    fileprivate var minimumCoastRate: Double { self == .freestyle ? 5 : 12 }
 
     static func load(from defaults: UserDefaults = .standard) -> ScrollStyle {
-        ScrollStyle(rawValue: defaults.string(forKey: "scrollStyle") ?? "") ?? .smooth
+        ScrollStyle(rawValue: defaults.string(forKey: "scrollStyle") ?? "") ?? .stepped
     }
 
     func save(to defaults: UserDefaults = .standard) {
@@ -57,9 +66,10 @@ final class ScrollController: Controller {
     private var scrollActive = false
     private var momentumActive = false
     private var momentumStart: TimeInterval?
+    private var coastStart: TimeInterval?
     private var coastVelocity = 0.0
     private var smoothedTickRate = 0.0
-    private var consecutiveReports = 0
+    private var consecutiveTicks = 0
     private struct Impulse {
         let start: TimeInterval
         let distance: Double
@@ -68,11 +78,9 @@ final class ScrollController: Controller {
     private var impulses: [Impulse] = []
     private static let frameInterval = 1.0 / 120
     private static let interpolation = 0.08
-    private static let gestureTimeout = 0.10
     private static let minimumPixelsPerTick = 2.0
-    private static let speedResponse = 0.12
 
-    init(style: ScrollStyle = .smooth,
+    init(style: ScrollStyle = .stepped,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping (TimeInterval, DispatchWorkItem) -> Void = {
              DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1)
@@ -115,9 +123,10 @@ final class ScrollController: Controller {
         impulses.removeAll()
         remainder = 0
         momentumStart = nil
+        coastStart = nil
         coastVelocity = 0
         smoothedTickRate = 0
-        consecutiveReports = 0
+        consecutiveTicks = 0
         lastRotate = nil
         direction = 0
     }
@@ -149,27 +158,35 @@ final class ScrollController: Controller {
                 post(event)
             }
         } else {
-            if lastRotate == nil || interval >= Self.gestureTimeout {
+            // A new tick within the gesture replaces the decaying tail without
+            // discarding the turn's speed history or its fractional movement.
+            coastStart = nil
+            if lastRotate == nil || interval >= style.gestureTimeout {
                 smoothedTickRate = 0
-                consecutiveReports = 1
+                consecutiveTicks = min(3, abs(ticks))
             } else {
-                // Estimate speed gradually. One closely spaced pair of reports
+                // Estimate speed gradually. One closely spaced pair of single-tick reports
                 // must not turn a fine adjustment into a large accelerated jump.
                 let rate = min(80, abs(steps) / max(interval, Self.frameInterval))
-                let blend = 1 - exp(-interval / Self.speedResponse)
+                let blend = 1 - exp(-interval / style.speedResponse)
                 smoothedTickRate += (rate - smoothedTickRate) * blend
-                consecutiveReports += 1
+                consecutiveTicks = min(3, consecutiveTicks + min(3, abs(ticks)))
             }
-            let speed = max(0, min(1, (smoothedTickRate - 8) / 40))
+            // Preserve a tiny one/two-tick adjustment while allowing Freestyle
+            // to respond much earlier once the user continues turning.
+            let speed = style == .freestyle && consecutiveTicks < 3 ? 0
+                : max(0, min(1, (smoothedTickRate - style.accelerationStart) / style.accelerationRange))
             let pixelsPerTick = Self.minimumPixelsPerTick
-                + (style.maximumPixelsPerTick - Self.minimumPixelsPerTick) * speed * speed
+                + (style.maximumPixelsPerTick - Self.minimumPixelsPerTick) * pow(speed, style.accelerationExponent)
             let distance = steps * pixelsPerTick
             impulses.append(Impulse(start: time, distance: distance))
             // Fine adjustments have no added coast. Inertia requires several
-            // reports and a sustained speed, independently of frame cadence.
-            coastVelocity = consecutiveReports >= 3 && smoothedTickRate >= 12
-                && interval < Self.gestureTimeout
-                ? Double(newDirection) * min(style.maximumCoastVelocity, abs(distance) / max(interval, Self.frameInterval) * style.coastVelocityScale)
+            // ticks and a sustained speed, independently of frame cadence.
+            // Match the last impulse's outgoing velocity instead of scaling
+            // it down based on report timing at the direct-to-glide boundary.
+            coastVelocity = consecutiveTicks >= 3 && smoothedTickRate >= style.minimumCoastRate
+                && interval < style.gestureTimeout
+                ? Double(newDirection) * min(style.maximumCoastVelocity, abs(distance) / Self.interpolation)
                 : 0
             if timer == nil {
                 lastFrame = time
@@ -197,47 +214,83 @@ final class ScrollController: Controller {
         let dt = time - lastFrame
         // A busy queue must not dump delayed movement into the foreground app.
         guard dt >= 0, dt <= 0.05 else { onCancel(); return }
+        let previous = lastFrame
         lastFrame = time
-        if let start = momentumStart {
-            let elapsed = min(style.coastDuration, time - start)
-            let previous = max(0, time - dt - start)
-            let distance = coastVelocity * style.decay
-                * (exp(-previous / style.decay) - exp(-elapsed / style.decay))
-            emit(distance, momentum: true)
-            if time - start >= style.coastDuration {
-                finishPhases(cancelled: false)
-                remainder = 0
-                momentumStart = nil
-                coastVelocity = 0
-                lastRotate = nil
-                direction = 0
+        if coastStart != nil {
+            if advanceCoast(from: previous, to: time) { enqueueFrame() }
+            return
+        }
+
+        var distance = 0.0
+        for index in impulses.indices {
+            let progress = max(0, min(1, (time - impulses[index].start) / Self.interpolation))
+            // Uniformly distribute each impulse instead of front-loading
+            // most of a tick into its first few animation frames.
+            let cumulative = impulses[index].distance * progress
+            distance += cumulative - impulses[index].delivered
+            impulses[index].delivered = cumulative
+        }
+        impulses.removeAll { time - $0.start >= Self.interpolation }
+        emit(distance, momentum: false)
+        if impulses.isEmpty, let last = lastRotate {
+            if coastVelocity != 0 {
+                // Physical motion starts decaying as soon as interpolation
+                // finishes. The gesture timeout only changes event phases;
+                // it must never introduce a pause or restart the velocity.
+                coastStart = last + Self.interpolation
+                if !advanceCoast(from: previous, to: time) { return }
+            } else if time - last >= style.gestureTimeout {
+                finishMotion()
                 return
-            }
-        } else {
-            var distance = 0.0
-            for index in impulses.indices {
-                let progress = max(0, min(1, (time - impulses[index].start) / Self.interpolation))
-                // Uniformly distribute each impulse instead of front-loading
-                // most of a tick into its first few animation frames.
-                let cumulative = impulses[index].distance * progress
-                distance += cumulative - impulses[index].delivered
-                impulses[index].delivered = cumulative
-            }
-            impulses.removeAll { time - $0.start >= Self.interpolation }
-            emit(distance, momentum: false)
-            if impulses.isEmpty, let last = lastRotate, time - last >= Self.gestureTimeout {
-                finishPhases(cancelled: false)
-                if coastVelocity != 0 {
-                    momentumStart = time
-                } else {
-                    remainder = 0
-                    lastRotate = nil
-                    direction = 0
-                    return
-                }
             }
         }
         enqueueFrame()
+    }
+
+    private func advanceCoast(from previous: TimeInterval, to time: TimeInterval) -> Bool {
+        guard let start = coastStart, let last = lastRotate else { return false }
+        let transition = last + style.gestureTimeout
+        func displacement(from lower: TimeInterval, to upper: TimeInterval) -> Double {
+            let a = max(0, min(style.coastDuration, lower - start))
+            let b = max(0, min(style.coastDuration, upper - start))
+            guard b > a else { return 0 }
+            // Velocity follows 1 - smoothstep(t / duration): it starts at
+            // the outgoing speed with no sudden braking, and reaches zero
+            // with zero slope. Integrate it exactly across frame/phase bounds
+            // so neither scheduling jitter nor phase changes restart the glide.
+            func integral(_ elapsed: TimeInterval) -> Double {
+                let u = elapsed / style.coastDuration
+                return u - u * u * u + 0.5 * u * u * u * u
+            }
+            return coastVelocity * style.coastDuration * (integral(b) - integral(a))
+        }
+        if momentumStart == nil {
+            emit(displacement(from: previous, to: min(time, transition)), momentum: false)
+            if time >= transition {
+                finishPhases(cancelled: false)
+                momentumStart = transition
+            }
+        }
+        if momentumStart != nil {
+            emit(displacement(from: max(previous, transition), to: time), momentum: true)
+        }
+        if time - start >= style.coastDuration {
+            finishMotion()
+            return false
+        }
+        return true
+    }
+
+    private func finishMotion() {
+        finishPhases(cancelled: false)
+        remainder = 0
+        momentumStart = nil
+        coastStart = nil
+        coastVelocity = 0
+        smoothedTickRate = 0
+        consecutiveTicks = 0
+        lastRotate = nil
+        direction = 0
     }
 
     private func emit(_ distance: Double, momentum: Bool) {

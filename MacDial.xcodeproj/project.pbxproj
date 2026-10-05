@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F01400000000000000000002 /* DialReportDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01400000000000000000001 /* DialReportDecoder.swift */; };
 		F01200000000000000000002 /* UndoRedoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200000000000000000001 /* UndoRedoController.swift */; };
 		F01300000000000000000002 /* EditwallSequenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01300000000000000000001 /* EditwallSequenceController.swift */; };
 		C882FA1A26F1430C00595EE1 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C882FA1926F1430C00595EE1 /* AppDelegate.swift */; };
@@ -35,6 +36,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F01400000000000000000001 /* DialReportDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialReportDecoder.swift; sourceTree = "<group>"; };
 		F01200000000000000000001 /* UndoRedoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoRedoController.swift; sourceTree = "<group>"; };
 		F01300000000000000000001 /* EditwallSequenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditwallSequenceController.swift; sourceTree = "<group>"; };
 		C882FA1626F1430C00595EE1 /* MacDial.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacDial.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -123,6 +125,7 @@
 				C882FA2626F1430D00595EE1 /* MacDial.entitlements */,
 				C882FA1F26F1430D00595EE1 /* Preview Content */,
 				C89F31582701090400A8B365 /* Dial.swift */,
+				F01400000000000000000001 /* DialReportDecoder.swift */,
 				C89D242A2703CF4500B1A458 /* ScrollController.swift */,
 				C89D242C2704870C00B1A458 /* PlaybackController.swift */,
 			);
@@ -235,6 +238,7 @@
 				C89D24292703BA5E00B1A458 /* Controller.swift in Sources */,
 				C89D242D2704870C00B1A458 /* PlaybackController.swift in Sources */,
 				C89F31592701090400A8B365 /* Dial.swift in Sources */,
+				F01400000000000000000002 /* DialReportDecoder.swift in Sources */,
 				C89D242B2703CF4500B1A458 /* ScrollController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

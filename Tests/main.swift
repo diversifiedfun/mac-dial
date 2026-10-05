@@ -14,6 +14,35 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     checks += 1
 }
 
+func signedTicks(_ rotation: Dial.Rotation?) -> Int {
+    switch rotation {
+    case .Clockwise(let count): return count
+    case .CounterClockwise(let count): return -count
+    case nil: return 0
+    }
+}
+
+// Literal HID packets exercise the same decoder used by the device reader.
+// Counts with low bytes 0x00/0x01/0xff used to disappear or get the wrong sign.
+for (low, high, expected): (UInt8, UInt8, Int) in [
+    (0x00, 0x00, 0), (0x01, 0x00, 1), (0xff, 0xff, -1),
+    (0x02, 0x00, 2), (0xfe, 0xff, -2), (0x7f, 0x00, 127),
+    (0x80, 0x00, 128), (0x80, 0xff, -128), (0xff, 0x00, 255),
+    (0x00, 0x01, 256), (0x01, 0x01, 257), (0x01, 0xff, -255),
+    (0x00, 0xff, -256), (0xff, 0xfe, -257),
+    (0xff, 0x7f, 32767), (0x00, 0x80, -32768)
+] {
+    for pressed in [false, true] {
+        let flags: UInt8 = pressed ? 3 : 2 // Touch bit must not masquerade as button state.
+        let decoded = DialReportDecoder.decode([1, flags, low, high, 0xff, 0xff, 0, 0, 58])!
+        check(signedTicks(decoded.rotation) == expected, "HID decoder preserves the full signed 16-bit rotation")
+        check(decoded.button == (pressed ? .pressed : .released), "HID decoder preserves button state alongside every rotation count")
+    }
+}
+for bytes: [UInt8] in [[], [1], [1, 0], [1, 0, 1], [2, 0, 1, 0]] {
+    check(DialReportDecoder.decode(bytes) == nil, "Truncated and unrelated HID reports are rejected safely")
+}
+
 final class Clock {
     var time: TimeInterval = 0
     var pending: [(TimeInterval, DispatchWorkItem)] = []
@@ -676,12 +705,12 @@ for screen in [NSRect(x: 0, y: 25, width: 1440, height: 875),
 
 // Scroll clicks toggle styles and never synthesize mouse button events.
 var mouse: [CGEvent] = []
-let scroll = ScrollController(post: { mouse.append($0) })
+let scroll = ScrollController(style: .precision, post: { mouse.append($0) })
 scroll.onDown()
 scroll.onDown()
 scroll.onCancel()
 scroll.onUp()
-check(scroll.style == .smooth && mouse.isEmpty, "Cancelled Scroll clicks do not toggle or emit mouse input")
+check(scroll.style == .precision && mouse.isEmpty, "Cancelled Scroll clicks do not toggle or emit mouse input")
 scroll.onDown()
 scroll.onUp()
 scroll.onUp()
@@ -1525,7 +1554,7 @@ final class ScrollHarness {
     var pointerLocation = CGPoint(x: 100, y: 200)
     var permitted = true
     lazy var controller: ScrollController = {
-        let result = ScrollController(now: { [unowned self] in self.clock.time },
+        let result = ScrollController(style: .precision, now: { [unowned self] in self.clock.time },
                                       schedule: { [unowned self] in self.clock.schedule($0, $1) },
                                       makeScrollEvent: { [unowned self] source, pixels in
                                           let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel,
@@ -1561,7 +1590,47 @@ final class ScrollHarness {
     }
 }
 
-for style in [ScrollStyle.smooth, .freewheel] {
+// Model the same 20-degree turn at Extreme: slow reports carry one tick,
+// while faster reports carry five. Exercise wire decoding through event output.
+for style in ScrollStyle.allCases {
+    for direction in [-1, 1] {
+        func runTurn(batch: Int, interval: Double) -> (ticks: Int, pixels: Int64) {
+            let h = ScrollHarness()
+            h.controller.setStyle(style)
+            var total = 0
+            for index in 0..<(20 / batch) {
+                if index > 0 { h.advance(interval) }
+                let bits = UInt16(bitPattern: Int16(direction * batch))
+                let report = DialReportDecoder.decode([1, 0, UInt8(bits & 0xff), UInt8(bits >> 8)])!
+                total += signedTicks(report.rotation)
+                if let rotation = report.rotation { h.controller.onRotate(rotation, 1) }
+            }
+            h.advance(1.5)
+            return (total, h.pixels.reduce(0, +))
+        }
+        let slow = runTurn(batch: 1, interval: 0.25)
+        let fast = runTurn(batch: 5, interval: 0.02)
+        check(slow.ticks == 20 * direction && fast.ticks == slow.ticks,
+              "Slow and fast reports preserve the same physical turn at Extreme")
+        check(abs(fast.pixels) >= abs(slow.pixels) && fast.pixels * Int64(direction) > 0,
+              "Faster batched turns never scroll less or reverse direction")
+    }
+}
+
+do {
+    let h = ScrollHarness()
+    h.controller.setStyle(.freestyle)
+    for _ in 0..<2 {
+        let report = DialReportDecoder.decode([1, 0, 5, 0])!
+        h.controller.onRotate(report.rotation!, 1)
+        h.advance(0.02)
+    }
+    h.advance(1.5)
+    check(h.pixels.reduce(0, +) > 20 && !h.momentum.isEmpty,
+          "Ten ticks in two reports accelerate as a real turn, not a two-tick fine adjustment")
+}
+
+for style in [ScrollStyle.precision, .freestyle] {
     for direction in [-1, 1] {
         let h = ScrollHarness()
         h.controller.setStyle(style)
@@ -1588,7 +1657,7 @@ for style in [ScrollStyle.smooth, .freewheel] {
         h.advance(1.3)
         let direct = h.events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 }
         let distance = direct.reduce(Int64(0)) { $0 + $1.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
-        check(distance > 24 && distance < 12 * (style == .freewheel ? 144 : 96),
+        check(distance > 24 && distance < 12 * (style == .freestyle ? 144 : 96),
               "Sustained fast input accelerates gradually within the distance ceiling")
         check(h.momentum.first?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 1
               && h.momentum.last?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 3, "Momentum begins and ends with Quartz phases")
@@ -1596,11 +1665,54 @@ for style in [ScrollStyle.smooth, .freewheel] {
         check(h.events.allSatisfy { !($0.getIntegerValueField(.scrollWheelEventScrollPhase) != 0
                                    && $0.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0) }, "Direct and momentum phases never overlap")
         let coast = h.momentum.map { $0.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
-        check(coast.reduce(0, +) > 0 && coast.reduce(0, +) < (style == .freewheel ? 601 : 100) && h.clock.pending.isEmpty, "Coast is bounded and shuts down")
+        check(coast.reduce(0, +) > 0 && coast.reduce(0, +) < (style == .freestyle ? 1441 : 361) && h.clock.pending.isEmpty, "Coast is bounded and shuts down")
         check(coast.first! > coast.dropLast().last!, "Coast decelerates")
         let ended = h.events.firstIndex { $0.getIntegerValueField(.scrollWheelEventScrollPhase) == 4 }!
-        check(h.eventTimes.last! - h.eventTimes[ended] <= (style == .freewheel ? 1.0 : 0.30) + 1.0 / 120 + 0.00001,
+        check(h.eventTimes.last! - h.eventTimes[ended] <= (style == .freestyle ? 1.2 : 0.60) + 1.0 / 120 + 0.00001,
               "Momentum terminates within its style limit plus one scheduling frame")
+    }
+
+    // Measure motion across the direct-to-momentum boundary, not just total
+    // distance: a zero-motion wait followed by a new kick must fail this test.
+    do {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.fastTurn()
+        h.advance(0.08)
+        var windows: [Int64] = []
+        for _ in 0..<10 {
+            let count = h.events.count
+            h.advance(1.0 / 60 + 0.000001)
+            windows.append(h.pixels.dropFirst(count).reduce(0, +))
+        }
+        check(windows.allSatisfy { $0 > 0 }, "Direct scrolling flows into inertia without a stopped interval: \(style) \(windows)")
+        check(zip(windows, windows.dropFirst()).allSatisfy { $1 <= $0 + 2 },
+              "The glide decelerates through the handoff instead of kicking back up: \(style) \(windows)")
+    }
+
+    // The beginning should retain speed, while the end tapers almost to
+    // rest. This catches strong exponential braking and a hard velocity cutoff.
+    do {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.fastTurn()
+        h.advance(0.08 + 0.000001)
+        var count = h.events.count
+        h.advance(1.0 / 30 + 0.000001)
+        let first = h.pixels.dropFirst(count).reduce(0, +)
+        h.advance(0.066666)
+        count = h.events.count
+        h.advance(1.0 / 30 + 0.000001)
+        let early = h.pixels.dropFirst(count).reduce(0, +)
+        check(Double(early) >= Double(first) * 0.8,
+              "The first 100 ms of the glide retains most of its speed: \(style) \(first) -> \(early)")
+        let duration = style == .freestyle ? 1.2 : 0.6
+        h.advance(duration - 0.233335)
+        count = h.events.count
+        h.advance(0.12)
+        let ending = h.pixels.dropFirst(count).reduce(0, +)
+        check(ending < first && h.clock.pending.isEmpty,
+              "Glide tapers to rest before the final phase instead of cutting off at speed")
     }
 
     // A small adjustment must stay precise even when two reports land close together.
@@ -1657,7 +1769,7 @@ for style in [ScrollStyle.smooth, .freewheel] {
         let h = ScrollHarness()
         h.controller.setStyle(style)
         h.fastTurn()
-        h.advance(0.15)
+        h.advance(0.25)
         check(!h.momentum.isEmpty, "Pointer regression test starts during active inertia")
         for position in [CGPoint(x: 420, y: 350), CGPoint(x: -800, y: 120)] {
             h.pointerLocation = position
@@ -1678,11 +1790,11 @@ for style in [ScrollStyle.smooth, .freewheel] {
               "Pointer movement preserves the balanced momentum ending")
     }
 
-    for duringCoast in [false, true] {
+    for stopDelay in [0.02, 0.12, 0.25] {
         let h = ScrollHarness()
         h.controller.setStyle(style)
         h.fastTurn()
-        h.advance(duringCoast ? 0.15 : 0.02)
+        h.advance(stopDelay)
         h.controller.onRotate(.CounterClockwise(1), 1)
         let count = h.events.count
         h.advance(1.3)
@@ -1690,11 +1802,11 @@ for style in [ScrollStyle.smooth, .freewheel] {
     }
 
     for reason in ["press", "cancel", "style", "context", "stall"] {
-        for duringCoast in [false, true] {
+        for stopDelay in [0.02, 0.12, 0.25] {
             let h = ScrollHarness()
             h.controller.setStyle(style)
             h.fastTurn()
-            h.advance(duringCoast ? 0.15 : 0.02)
+            h.advance(stopDelay)
             let count = h.events.count
             switch reason {
             case "press": h.controller.onPressBegan()
@@ -1722,21 +1834,69 @@ do {
     check(h.pixels.last == 24 && h.clock.pending.isEmpty, "Cancellation resets Stepped acceleration without scheduling frames")
 }
 
-// Freewheel must materially out-travel Smooth for the same fast input.
+// Freestyle must materially out-travel Precision for the same fast input.
 do {
-    let smooth = ScrollHarness()
-    let freewheel = ScrollHarness()
-    freewheel.controller.setStyle(.freewheel)
-    smooth.fastTurn()
-    freewheel.fastTurn()
-    smooth.advance(0.5)
-    freewheel.advance(0.5)
-    check(smooth.clock.pending.isEmpty && !freewheel.clock.pending.isEmpty,
-          "Freewheel continues gliding after Smooth has stopped")
-    freewheel.advance(0.8)
-    check(Double(freewheel.pixels.reduce(0, +)) > Double(smooth.pixels.reduce(0, +)) * 1.5,
-          "Freewheel covers substantially more of a long page for the same fast turn")
-    check(freewheel.clock.pending.isEmpty, "Freewheel stops scheduling when its longer glide ends")
+    let precision = ScrollHarness()
+    let freestyle = ScrollHarness()
+    freestyle.controller.setStyle(.freestyle)
+    precision.fastTurn()
+    freestyle.fastTurn()
+    precision.advance(0.75)
+    freestyle.advance(0.75)
+    check(precision.clock.pending.isEmpty && !freestyle.clock.pending.isEmpty,
+          "Freestyle continues gliding after Precision has stopped")
+    freestyle.advance(0.8)
+    check(Double(freestyle.pixels.reduce(0, +)) > Double(precision.pixels.reduce(0, +)) * 1.5,
+          "Freestyle covers substantially more of a long page for the same fast turn")
+    check(freestyle.clock.pending.isEmpty, "Freestyle stops scheduling when its longer glide ends")
+}
+
+// Match the final direct-motion speed at ordinary turning rates too;
+// report-frequency multipliers used to drop this speed by a factor of three.
+for (style, spacing) in [(ScrollStyle.precision, 0.06), (.freestyle, 0.12)] {
+    let h = ScrollHarness()
+    h.controller.setStyle(style)
+    for index in 0..<12 {
+        if index > 0 { h.advance(spacing) }
+        h.controller.onRotate(.Clockwise(1), 1)
+    }
+    h.advance(0.08 - 1.0 / 60 + 0.000001)
+    var count = h.events.count
+    h.advance(1.0 / 60 + 0.000001)
+    let outgoing = h.pixels.dropFirst(count).reduce(0, +)
+    count = h.events.count
+    h.advance(1.0 / 60 + 0.000001)
+    let incoming = h.pixels.dropFirst(count).reduce(0, +)
+    check(outgoing > 0 && abs(incoming - outgoing) <= 2,
+          "Glide inherits the outgoing speed without report-rate damping")
+}
+
+// Medium sensitivity reports every 10 degrees: 120–180 ms between ticks is
+// an ordinary sustained turn, not a sequence of isolated fine adjustments.
+for spacing in [0.12, 0.18] {
+    for direction in [-1, 1] {
+        let precision = ScrollHarness()
+        let freestyle = ScrollHarness()
+        freestyle.controller.setStyle(.freestyle)
+        for index in 0..<8 {
+            if index > 0 {
+                precision.advance(spacing)
+                freestyle.advance(spacing)
+            }
+            precision.controller.onRotate(.Clockwise(1), direction)
+            freestyle.controller.onRotate(.Clockwise(1), direction)
+        }
+        precision.advance(1.5)
+        freestyle.advance(1.5)
+        let direct = freestyle.events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 }
+            .reduce(Int64(0)) { $0 + $1.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
+        check(precision.pixels.reduce(0, +) == 16 * direction && precision.momentum.isEmpty,
+              "Precision keeps its existing precision at moderate Medium-sensitivity turn speeds")
+        check(abs(direct) >= (spacing == 0.12 ? 150 : 60),
+              "Freestyle responds to moderate sustained turns instead of resetting every tick")
+        check(!freestyle.momentum.isEmpty && freestyle.clock.pending.isEmpty,
+              "Moderate Freestyle turning builds bounded inertia and then stops")
+    }
 }
 
 // The same button recognizer is used at every hold threshold and app profile.
@@ -1760,16 +1920,16 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
         routing.click()
         check(changes == [.stepped] && motion.events.isEmpty, "Short click changes style once with no mouse events")
         routing.click()
-        check(changes == [.stepped, .freewheel], "Second click selects Freewheel")
+        check(changes == [.stepped, .freestyle], "Second click selects Freestyle")
         routing.open()
         routing.input.highlight(.scrolling)
         routing.report(.pressed)
         routing.clock.advance(0.05)
         routing.report(.released)
-        check(changes == [.stepped, .freewheel], "Holding and confirming Scroll preserves Freewheel")
+        check(changes == [.stepped, .freestyle], "Holding and confirming Scroll preserves Freestyle")
         routing.click()
-        check(changes == [.stepped, .freewheel, .smooth] && motion.events.isEmpty,
-              "Third click wraps to Smooth without mouse events")
+        check(changes == [.stepped, .freestyle, .precision] && motion.events.isEmpty,
+              "Third click wraps to Precision without mouse events")
     }
 }
 
@@ -1784,9 +1944,17 @@ do {
     let suite = "MacDial.ScrollTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
-    check(ScrollStyle.load(from: defaults) == .smooth, "Smooth is the default")
+    check(ScrollStyle.load(from: defaults) == .stepped && ScrollController().style == .stepped, "Stepped is the default")
     defaults.set("invalid", forKey: "scrollStyle")
-    check(ScrollStyle.load(from: defaults) == .smooth, "Unknown styles fall back to Smooth")
+    check(ScrollStyle.load(from: defaults) == .stepped, "Unknown styles fall back to Stepped")
+    check(ScrollStyle.allCases.map(\.title) == ["Stepped", "Freestyle", "Precision"],
+          "Scroll menu uses the requested labels and order")
+    check(ScrollStyle.stepped.next == .freestyle && ScrollStyle.freestyle.next == .precision
+          && ScrollStyle.precision.next == .stepped, "Click cycle follows the menu order")
+    for (saved, expected) in [("smooth", ScrollStyle.precision), ("freewheel", .freestyle), ("stepped", .stepped)] {
+        defaults.set(saved, forKey: "scrollStyle")
+        check(ScrollStyle.load(from: defaults) == expected, "Renamed scroll styles preserve existing selections")
+    }
     for style in ScrollStyle.allCases {
         style.save(to: defaults)
         check(ScrollStyle.load(from: UserDefaults(suiteName: suite)!) == style, "Scroll style survives preference reload")

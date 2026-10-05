@@ -203,7 +203,7 @@ class StatusBarController
 
     private func refreshScrollStyleUI() {
         for option in menuItems.scrollStyleOptions { option.selected = option.option == scrollController.style }
-        let help = "Scroll style: \(scrollController.style.title). Click to cycle Smooth / Stepped / Freewheel. Hold to choose a mode."
+        let help = "Scroll style: \(scrollController.style.title). Click to cycle Stepped / Freestyle / Precision. Hold to choose a mode."
         menuItems.scrollMode.toolTip = help
         menuItems.scrollMode.setAccessibilityHelp(help)
         updateIcon()

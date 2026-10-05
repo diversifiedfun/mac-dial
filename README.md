@@ -13,7 +13,7 @@ You can find universal builds of the app under "releases". Note that these build
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
 The app supports four general modes, plus contextual Lightroom Classic and Editwall modes:
-* Scroll mode: Turn to scroll. Short-click to cycle Smooth / Stepped / Freewheel; pressing immediately stops ongoing motion. Hold to open the mode picker. Scroll no longer sends mouse clicks.
+* Scroll mode: Turn to scroll. Short-click to cycle Stepped / Freestyle / Precision; pressing immediately stops ongoing motion. Hold to open the mode picker. Scroll no longer sends mouse clicks.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
 * Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. Single-click to undo once; double-click to redo once. Holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
@@ -31,16 +31,25 @@ cancelling, or confirming the picker.
 
 ### Scroll styles
 
-**Smooth** is the default. A slow, isolated tick moves just **2 pixels**, spread
-uniformly over approximately 80 ms in one-pixel increments. Repeated faster
-turns gradually increase the distance per tick, up to 96 pixels, rather than
-accelerating abruptly on the second tick. Tiny adjustments have no extra coast;
-inertia requires sustained faster input and lasts at most 300 ms.
-**Stepped** preserves the previous immediate, accelerated scroll jumps.
-**Freewheel** uses the same slow-tick precision, with a higher fast-turn ceiling
-of 144 pixels per tick and up to one second of coast for long pages. Press to
-stop or reverse to discard the old glide. The pointer remains free to move
-throughout either style’s glide; inertia events never restore an old position.
+**Stepped** is the default and preserves immediate, accelerated scroll jumps.
+**Freestyle** keeps one- and two-tick adjustments precise, then builds speed
+more quickly as you continue turning. It connects ticks up to 220 ms apart, so
+moderate turns at Medium sensitivity accelerate instead of continually resetting
+to the slow speed. Its ceiling remains 144 pixels per tick, with up to 1.2 seconds
+of coast for long pages.
+**Precision** moves a slow, isolated tick just **2 pixels**, spread uniformly over
+approximately 80 ms in one-pixel increments. Repeated faster turns gradually
+increase the distance per tick, up to 96 pixels, rather than accelerating abruptly
+on the second tick. Tiny adjustments have no extra coast; inertia requires
+sustained faster input and eases to rest over about 600 ms.
+
+Press to stop or reverse to discard the glide. The pointer remains free to move
+throughout either animated style’s glide; inertia never restores an old position.
+After sustained turning, deceleration begins as soon as the final tick’s
+movement finishes. The handoff to momentum events continues that same glide,
+without waiting motionless for the gesture timeout or restarting at a higher speed.
+The glide starts at the outgoing scroll speed, brakes gently at first, and tapers
+to zero smoothly rather than using a steep exponential drop or a hard cutoff.
 
 Wheel Sensitivity determines the physical turn needed for a report: Low = 20°,
 Medium = 10°, High = 5°, and Extreme = 1°. Higher sensitivity detects smaller
@@ -48,8 +57,15 @@ turns and produces more ticks per revolution. The app cannot respond to movement
 between hardware reports, but each report can produce small pixel increments.
 Existing sensitivity preferences are preserved.
 
-Short-click in Scroll to cycle **Smooth → Stepped → Freewheel → Smooth**, or use **Scroll Style → Smooth / Stepped / Freewheel**
+Rotation reports are decoded as signed 16-bit tick counts, including reports
+that contain multiple ticks during fast turns. Acceleration and fine-adjustment
+thresholds count actual ticks rather than assuming one tick per report. This
+prevents dropped or reversed movement at high speed, especially at Extreme.
+
+Short-click in Scroll to cycle **Stepped → Freestyle → Precision → Stepped**, or use **Scroll Style → Stepped / Freestyle / Precision**
 in the menu bar. The choice is remembered globally across apps and restarts.
+Existing Smooth and Freewheel selections become Precision and Freestyle;
+Stepped is used when no valid selection has been saved.
 The menu checkmark and tooltip show the selected style; toggling gives a pulse
 only when Haptics is enabled, with no on-screen notification. Scroll remains a
 single radial-menu choice, and confirming it does not toggle the style.
@@ -57,7 +73,7 @@ single radial-menu choice, and confirming it does not toggle the style.
 Pressing, changing style/direction/sensitivity, opening the picker, changing
 apps or modes, disconnecting, sleeping, and ending the session cancel motion.
 Delayed timer callbacks discard movement instead of producing a catch-up jump.
-Smooth and Freewheel send pixel scroll and momentum phases, but the exact feel depends on
+Precision and Freestyle send pixel scroll and momentum phases, but the exact feel depends on
 the receiving app; Stepped remains available for compatibility. Wheel Sensitivity
 and Haptics retain their existing hardware behavior.
 

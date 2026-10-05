@@ -23,14 +23,17 @@ final class PreviewDelegate: NSObject, NSApplicationDelegate {
             else { self.menu.dismiss() }
         }
         input.onCommit = { [weak self] mode in
-            self?.mode = mode
-            self?.status.button?.title = "Preview: \(mode.title)"
+            guard let self = self else { return false }
+            self.mode = mode
+            self.status.button?.title = "Preview: \(mode.title)"
             print("Selected \(mode.title)")
+            return true
         }
+        input.onConfirmation = { [weak self] in self?.menu.confirm($0) }
         menu.view.onHighlight = { [weak self] in self?.input.highlight($0) }
+        menu.view.onPressHighlight = { [weak self] in self?.input.highlight($0, feedback: false) }
         menu.view.onSelect = { [weak self] mode in
-            self?.input.highlight(mode)
-            self?.input.confirmSelection()
+            self?.input.confirmSelection(mode)
         }
         menu.view.onMove = { [weak self] in self?.input.moveSelection(by: $0) }
         menu.view.onConfirm = { [weak self] in self?.input.confirmSelection() }

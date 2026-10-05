@@ -34,8 +34,9 @@ cancelling, or confirming the picker.
 Hold the Dial for **600 ms** by default, release, turn to highlight a mode, then
 click to select it. Choose **Menu Press Duration** in the menu bar, beside Wheel
 Sensitivity, to use **200, 300, 400, 500, or 600 ms**. The choice is saved across
-launches and applies to the next press, including a second hold to cancel the
-picker. A 300-point native macOS wheel opens at the pointer and stays within
+launches and controls the hold that opens the picker. Once the picker is armed,
+the next press selects immediately, regardless of how long it is held.
+A 300-point native macOS wheel opens at the pointer and stays within
 that display's visible area. Four equal wedges place Scroll at the top, Playback
 at the right, Zoom at the bottom, and Undo/Redo at the left. The center names the
 highlighted mode and shows picker navigation instructions.
@@ -59,8 +60,9 @@ open menu's highlight. First Item follows the selectable menu order if that
 order changes in a future version; it does not override saved app-specific modes.
 
 The opening hold only opens the picker; releasing it arms selection. The current
-mode continues to be the saved mode until a subsequent short press confirms on
-release. Clockwise advances Scroll → Playback → Zoom → Undo/Redo, wrapping in either
+mode continues to be the saved mode until the next press confirms immediately.
+Holding that confirming press cannot cancel or reopen the picker; its repeated
+reports and eventual release are consumed. Clockwise advances Scroll → Playback → Zoom → Undo/Redo, wrapping in either
 direction. Each rotation tick advances exactly one choice, with one automatic
 haptic click when Haptics is enabled. Wheel Sensitivity controls menu spacing:
 
@@ -77,12 +79,27 @@ latest normal sensitivity on every exit. Saved preferences are not overwritten.
 Scroll Direction does not reverse menu navigation.
 
 You can also hover and click a segment, use the arrow keys, and press Return.
-Escape, another long hold, an outside click, or 10 seconds without interaction
+Confirming applies the mode immediately and shows a 300 ms visual acknowledgement:
+the chosen segment turns blue, other icons and dividers fade over 100 ms, and the
+center shows the mode name with a checkmark and **Selected**. The menu holds until
+200 ms, then fades out over 100 ms. Reduce Motion shows the same confirmation
+without animation before dismissing at 300 ms. Keyboard focus and pointer input
+are released immediately, and the next Dial rotation operates the selected mode.
+Reselecting the current mode gives the same confirmation. Assistive technology
+receives a mode-selection announcement.
+Haptic and sensitivity-restoration writes run on a separate serial queue, so the
+visual countdown starts immediately and keeps drawing even if the device is slow.
+The confirmation pulse is sent before the sensitivity reset. Queued ticks from
+menu sensitivity are discarded until normal sensitivity has been restored.
+
+Escape, an outside click, or 10 seconds without interaction
 cancels without changing modes. Disconnecting, changing apps/Spaces/displays,
 sleeping, selecting a mode from the menu bar, or quitting also cancels safely.
 Opening, selection, and confirmation feedback follows the Haptics setting.
 Rotating uses the hardware click without a duplicate software pulse; keyboard
-and pointer selection retain their feedback. If menu configuration fails, the
+and pointer browsing retain their feedback. A direct click confirms with one
+pulse rather than adding a separate press-highlight pulse. Cancellation never
+shows selection confirmation or emits a confirmation pulse. If menu configuration fails, the
 picker cancels and attempts to restore normal sensitivity. Queued rotation from
 an earlier configuration is ignored while valid button releases are preserved.
 
@@ -213,7 +230,8 @@ require removing and re-adding it under Privacy & Security > Accessibility
   starting positions, short clicks, menu routing, cancellation, selection
   normalization, preference compatibility, multi-display placement, and actual
   controller events recorded without posting input to the desktop.
-- `bash Tests/render.sh` checks the native view's accessibility and input handlers
+- `bash Tests/render.sh` checks the native view's accessibility and input handlers,
+  confirmation timing, input release, Reduce Motion, and interrupted/reopened menus,
   and exports all general, Lightroom, and Editwall selections, opening states, and
   opaque/high-contrast fallbacks under `../build/radial-render/images/`.
   General exports are 600×600 pixels and contextual exports are 864×864 at 2×.
@@ -227,8 +245,8 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The Editwall Sequence Release build, strict code-signature verification,
-1,289 recording-only behavior checks, and 752 native-view checks pass.
+The selection-confirmation Release build, strict code-signature verification,
+1,355 recording-only behavior checks, and 972 native-view/presentation checks pass.
 The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure

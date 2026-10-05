@@ -1,5 +1,37 @@
 # Grouped Lightroom radial picker — design QA
 
+## Selection confirmation — October 5, 2026
+
+- Implemented the approved 300 ms confirmation: system-blue selected segment,
+  white icon, mode name, checkmark and “Selected”; other choices fade over 100 ms.
+  The panel fades during the final 100 ms, while mode input resumes immediately.
+- Confirmation renderings for every mode in the general, Lightroom and Editwall
+  layouts are under `../build/radial-render/images/*-confirmed.png`, with
+  `*-confirmed-accessible.png` covering opaque and increased-contrast settings.
+  General Zoom and Lightroom Crop & Browse confirmations were visually inspected.
+- 1,355 behavior checks and 972 view/presentation checks pass. Presentation checks
+  use the production controller with a deterministic scheduler and cover 100/200/
+  250/300 ms states, Reduce Motion, duplicate selection, focus/pointer release,
+  interrupted opening, reopening during fade, and lifecycle dismissal.
+- Selection now commits on the next press after the opening hold is released.
+  Keeping that press held cannot cancel, reopen, or trigger an action in the new
+  mode. Escape, outside click and timeout remain cancellation paths.
+- Follow-up latency fix: the previous ordering waited for the HID pulse before
+  displaying confirmation, which preserved the animation but delayed its start.
+  Haptic and sensitivity-exit writes now use a separate serial queue; the pulse
+  is queued before the sensitivity reset. Input-generation and connection-status
+  queries use lightweight snapshots instead of waiting for hardware locks.
+- Integrated tests hold hardware jobs pending while the production picker commits
+  on press and runs its complete animation; both normal and reduced motion pass.
+  Worker tests verify pulse ordering, stale restores after reopening, suppression
+  of queued pulses on cancellation/reconnect/haptics disable, and nonblocking UI
+  queries during an in-flight write. Physical timing still needs device validation.
+- The hardware-free desktop preview opened correctly; Return selected the mode
+  and dismissed its window. The transient 300 ms sequence was too short for the
+  desktop capture to retain; timing is verified by the presentation checks and
+  appearance by native renders. Physical Dial pulse/feel and VoiceOver announcement
+  playback remain unverified. The Release build and strict signature check pass.
+
 **final result: passed** — native component rendering and view-level behavior.
 Remove's live Lightroom keyboard shortcuts also pass; physical-device and
 full picker desktop checks remain unverified, as detailed below.

@@ -18,6 +18,7 @@ private final class ModeGroupView: NSView {
 
 final class RadialMenuView: NSView {
     var onHighlight: ((Mode) -> Void)?
+    var onPressHighlight: ((Mode) -> Void)?
     var onSelect: ((Mode) -> Void)?
     var onMove: ((Int) -> Void)?
     var onConfirm: (() -> Void)?
@@ -30,6 +31,7 @@ final class RadialMenuView: NSView {
     private let clickLabel = NSTextField(labelWithString: "Click to select")
     private let contextLabel = NSTextField(labelWithString: "LIGHTROOM")
     private let gestureLabel = NSTextField(labelWithString: "Turn • Click to select")
+    private let confirmationIcon = DecorationImageView()
     private let appGroup = ModeGroupView()
     private let appIcon = DecorationImageView()
     private var buttons: [Mode: NSButton] = [:]
@@ -37,6 +39,7 @@ final class RadialMenuView: NSView {
     private var displayObserver: NSObjectProtocol?
     private var mouseDownMode: Mode?
     private var isArmed = false
+    private(set) var isConfirming = false
     private(set) var menuLayout = RadialMenuLayout(profile: nil)
 
     override var acceptsFirstResponder: Bool { true }
@@ -71,6 +74,11 @@ final class RadialMenuView: NSView {
             addSubview(label)
         }
         titleLabel.textColor = .white
+        confirmationIcon.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        confirmationIcon.contentTintColor = .white
+        confirmationIcon.setAccessibilityElement(false)
+        confirmationIcon.isHidden = true
+        addSubview(confirmationIcon)
         contextLabel.font = .systemFont(ofSize: 9, weight: .semibold)
         gestureLabel.font = .systemFont(ofSize: 10)
         rebuildControls()
@@ -113,6 +121,7 @@ final class RadialMenuView: NSView {
             button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 28, weight: .regular))
             button.contentTintColor = .white
+            (button.cell as? NSButtonCell)?.imageDimsWhenDisabled = false
             button.target = self
             button.action = #selector(selectIcon(_:))
             button.tag = Mode.allCases.firstIndex(of: mode)!
@@ -159,6 +168,14 @@ final class RadialMenuView: NSView {
     }
 
     func update(_ state: ModePickerState) {
+        if isConfirming { mouseDownMode = nil }
+        isConfirming = false
+        surface.isConfirming = false
+        surface.decorationOpacity = 1
+        confirmationIcon.isHidden = true
+        appIcon.alphaValue = 1
+        turnLabel.isHidden = false
+        clickLabel.isHidden = false
         if menuLayout.profile != state.profile {
             menuLayout = RadialMenuLayout(profile: state.profile)
             rebuildControls()
@@ -188,7 +205,7 @@ final class RadialMenuView: NSView {
             turnLabel.frame = NSRect(x: c.x - 74, y: c.y - 22, width: 148, height: 18)
             clickLabel.frame = NSRect(x: c.x - 74, y: c.y - 39, width: 148, height: 18)
             turnLabel.stringValue = state.isArmed ? "Turn to choose" : "Release to choose"
-            clickLabel.stringValue = state.isArmed ? "Click to select" : "Hold again to cancel"
+            clickLabel.stringValue = state.isArmed ? "Press to select" : "Esc to cancel"
         }
         for (mode, button) in buttons {
             button.alphaValue = mode == state.selectedMode ? 1 : 0.78
@@ -196,6 +213,39 @@ final class RadialMenuView: NSView {
             button.isEnabled = state.isArmed
         }
         if changed { NSAccessibility.post(element: self, notification: .selectedChildrenChanged) }
+    }
+
+    func showConfirmation(_ state: ModePickerState) {
+        update(state)
+        isConfirming = true
+        mouseDownMode = nil
+        isArmed = false
+        surface.isConfirming = true
+        buttons.values.forEach { $0.isEnabled = false }
+        let c = menuLayout.center
+        titleLabel.frame.origin.y = c.y + 2
+        contextLabel.isHidden = true
+        gestureLabel.isHidden = true
+        clickLabel.isHidden = true
+        turnLabel.stringValue = "Selected"
+        turnLabel.frame = NSRect(x: c.x - 18, y: c.y - 22, width: 58, height: 18)
+        confirmationIcon.frame = NSRect(x: c.x - 36, y: c.y - 20, width: 14, height: 14)
+        confirmationIcon.isHidden = false
+        NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
+            .announcement: "\(state.selectedMode.title) selected",
+            .priority: NSAccessibilityPriorityLevel.high.rawValue
+        ])
+    }
+
+    // The controller supplies progress so cancelled animations cannot alter a reopened menu.
+    func setConfirmationProgress(_ progress: CGFloat) {
+        guard isConfirming else { return }
+        let opacity = 1 - max(0, min(1, progress))
+        surface.decorationOpacity = opacity
+        appIcon.alphaValue = opacity
+        for (mode, button) in buttons {
+            button.alphaValue = mode == surface.selectedMode ? 1 : 0.78 * opacity
+        }
     }
 
     func updateDisplayOptions(reduceTransparency: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
@@ -219,9 +269,10 @@ final class RadialMenuView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard !isConfirming else { return }
         let point = convert(event.locationInWindow, from: nil)
         mouseDownMode = isArmed ? menuLayout.mode(at: point) : nil
-        if let mode = mouseDownMode { onHighlight?(mode) }
+        if let mode = mouseDownMode { onPressHighlight?(mode) }
         else if !menuLayout.outline.contains(point) { onCancel?() }
     }
 
@@ -232,6 +283,7 @@ final class RadialMenuView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        guard !isConfirming else { return }
         if event.keyCode == 53 { onCancel?(); return }
         guard isArmed else { return }
         switch event.keyCode {
@@ -253,6 +305,8 @@ private final class RadialSurfaceView: NSView {
     var selectedMode: Mode = .scrolling { didSet { needsDisplay = true } }
     var increasedContrast = false { didSet { needsDisplay = true } }
     var reduceTransparency = false { didSet { needsDisplay = true } }
+    var isConfirming = false { didSet { needsDisplay = true } }
+    var decorationOpacity: CGFloat = 1 { didSet { needsDisplay = true } }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -265,10 +319,10 @@ private final class RadialSurfaceView: NSView {
         layout.outline.fill()
         for segment in layout.segments {
             if segment.mode == selectedMode {
-                NSColor.white.withAlphaComponent(increasedContrast ? 0.24 : 0.10).setFill()
+                (isConfirming ? NSColor.systemBlue : NSColor.white.withAlphaComponent(increasedContrast ? 0.24 : 0.10)).setFill()
                 layout.path(for: segment).fill()
             } else if segment.mode == nil && layout.profile?.modes.contains(selectedMode) == true {
-                NSColor.systemBlue.withAlphaComponent(increasedContrast ? 0.24 : 0.12).setFill()
+                NSColor.systemBlue.withAlphaComponent((increasedContrast ? 0.24 : 0.12) * decorationOpacity).setFill()
                 layout.path(for: segment).fill()
             }
         }
@@ -278,6 +332,7 @@ private final class RadialSurfaceView: NSView {
             let border = NSBezierPath(ovalIn: layout.coreFrame.insetBy(dx: 0.5, dy: 0.5))
             border.lineWidth = 1
             border.stroke()
+            NSColor.white.withAlphaComponent((increasedContrast ? 0.45 : 0.10) * decorationOpacity).setStroke()
             for segment in layout.segments {
                 let angle = segment.angle + segment.sweep / 2
                 let line = NSBezierPath()
@@ -291,12 +346,15 @@ private final class RadialSurfaceView: NSView {
             outline.lineWidth = 1
             outline.stroke()
             for segment in layout.segments {
+                NSColor.white.withAlphaComponent((increasedContrast ? 0.45 : 0.10)
+                    * (segment.mode == selectedMode ? 1 : decorationOpacity)).setStroke()
                 let path = layout.path(for: segment)
                 path.lineWidth = 0.5
                 path.stroke()
             }
         }
         let middle = NSBezierPath(ovalIn: NSRect(x: layout.center.x - 72, y: layout.center.y - 72, width: 144, height: 144))
+        NSColor.white.withAlphaComponent(increasedContrast ? 0.45 : 0.10).setStroke()
         NSColor.black.withAlphaComponent(0.20).setFill()
         middle.fill()
         middle.lineWidth = 0.5

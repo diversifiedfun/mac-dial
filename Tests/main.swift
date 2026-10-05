@@ -39,6 +39,7 @@ final class Harness {
     var feedback = 0
     var presentations = 0
     var dismissals = 0
+    var confirmations: [ModePickerState] = []
     var configurations: [DialHardwareConfiguration] = []
     var failNextConfiguration = false
     lazy var configuration = DialConfigurationController { [unowned self] value in
@@ -64,7 +65,9 @@ final class Harness {
             self.commits.append(mode)
             self.mode = mode
             self.savedMode = mode.savedValue
+            return true
         }
+        input.onConfirmation = { [unowned self] in self.confirmations.append($0) }
         input.onPickerChanged = { [unowned self] state in
             if state == nil { self.dismissals += 1 }
             else { self.presentations += 1 }
@@ -154,7 +157,7 @@ do {
 
 // All non-confirming exits share the same restoration callback.
 for reason in ["escape", "outside click", "lost focus", "app change", "space change", "display change",
-               "sleep", "menu-bar mode", "timeout", "second hold", "shutdown", "presentation failure"] {
+               "sleep", "menu-bar mode", "timeout", "shutdown", "presentation failure"] {
     let h = Harness()
     h.configuration.update(sensitivity: .low)
     if reason == "presentation failure" {
@@ -162,11 +165,7 @@ for reason in ["escape", "outside click", "lost focus", "app change", "space cha
     }
     h.open()
     if reason == "timeout" { h.clock.advance(10) }
-    else if reason == "second hold" {
-        h.report(.pressed)
-        h.clock.advance(h.input.menuPressDuration.seconds)
-        h.report(.released, .Clockwise(1))
-    } else { h.input.cancel() }
+    else { h.input.cancel() }
     check(h.input.picker == nil && h.configurations.last?.ticksPerRevolution == 18,
           "\(reason) restores normal sensitivity")
     check(h.commits.isEmpty && h.rotations.isEmpty && h.clicks == 0,
@@ -447,11 +446,14 @@ for option in MenuPressDuration.allCases {
     h.report(.released)
     check(h.input.picker?.isArmed == true, "Release arms the menu at every duration")
     h.report(.pressed)
+    check(h.commits == [.scrolling] && h.confirmations.count == 1,
+          "Armed selection confirms on the press edge without waiting for a timer or release")
     h.clock.advance(threshold + 0.001)
-    check(h.input.picker == nil && h.commits.isEmpty, "Second hold uses the selected duration to cancel")
+    h.report(.pressed, .Clockwise(3))
+    check(h.input.picker == nil && h.commits == [.scrolling], "Selection confirms on press at every opening-hold duration")
     h.report(.released)
     h.click()
-    check(h.clicks == 1, "Short clicks resume after cancellation at every duration")
+    check(h.clicks == 1, "Short clicks resume after the confirming hold is released")
 }
 
 // Changing a preference mid-hold must not make the timer and release disagree.
@@ -503,7 +505,8 @@ do {
     check(h.mode == .playback && h.savedMode == "playback" && h.input.picker == nil,
           "Short confirmation commits and persists the highlight")
     check(h.clicks == 0 && h.rotations.isEmpty, "Confirmation and its rotation cannot leak")
-    check(h.commits == [.playback] && h.dismissals == 1, "Commit and dismissal occur once")
+    check(h.commits == [.playback] && h.confirmations.count == 1 && h.dismissals == 0,
+          "Commit and confirmation occur once without a cancellation dismissal")
     h.report(.released, .Clockwise(1))
     check(h.rotations == [-1], "Normal rotation resumes after dismissal")
     h.click()
@@ -533,9 +536,11 @@ do {
 // Escape, outside click, lifecycle changes and manual mode selection share cancel.
 for cancelWhilePressed in [false, true] {
     let h = Harness()
-    h.open()
+    if cancelWhilePressed {
+        h.report(.pressed)
+        h.clock.advance(h.input.menuPressDuration.seconds)
+    } else { h.open() }
     h.input.highlight(.zoom)
-    if cancelWhilePressed { h.report(.pressed) }
     h.input.cancel()
     h.input.cancel()
     h.report(.released, cancelWhilePressed ? .Clockwise(3) : nil)
@@ -554,16 +559,16 @@ do {
     h.input.highlight(.zoom)
     h.report(.pressed)
     h.clock.advance(0.6)
-    check(h.input.picker == nil && h.mode == .scrolling, "Second hold cancels")
+    check(h.input.picker == nil && h.mode == .zoom && h.commits == [.zoom], "A held selection confirms immediately")
     h.report(.pressed, .Clockwise(3))
     h.report(.released, .Clockwise(3))
-    check(h.clicks == 0 && h.rotations.isEmpty, "Cancel hold suppresses all input until release")
+    check(h.clicks == 0 && h.rotations.isEmpty, "Confirming hold suppresses all input until release")
     h.open()
     h.report(.pressed)
-    h.clock.time += 0.7 // cancellation detected by release, not by the timer
+    h.clock.time += 0.7 // A held confirmation cannot reopen the menu.
     h.report(.released, .Clockwise(3))
     check(h.input.picker == nil && h.clicks == 0 && h.rotations.isEmpty,
-          "Overdue cancellation release must not click or rotate")
+          "A delayed confirmation release must not click or rotate")
 }
 
 do {
@@ -841,7 +846,7 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
         h.report(.pressed)
         h.clock.advance(duration.seconds)
         h.report(.released, .Clockwise(5))
-        check(h.input.picker == nil && historyKeys.isEmpty, "Second hold cancels without touching history")
+        check(h.input.picker == nil && historyKeys.isEmpty, "Held selection confirms without touching history")
         h.report(.pressed)
         h.input.cancel()
         h.report(.released, .CounterClockwise(5))
@@ -1332,4 +1337,146 @@ let sequenceSegment = sequenceLayout.segment(for: .editwallSequence)!
 check(sequenceLayout.mode(at: sequenceLayout.point(angle: sequenceSegment.angle, radius: sequenceSegment.iconRadius)) == .editwallSequence,
       "Sequence outer icon hits the Sequence mode")
 check(AppProfile.editwall.availableModes == Mode.generalModes + [.editwallSequence], "Editwall has four general modes and one Sequence submode")
+// Confirmation is a presentation of an already accepted mode, never a delayed commit.
+for profile: AppProfile? in [nil, .lightroom, .editwall] {
+    for enabled in [false, true] {
+        let h = Harness()
+        h.profile = profile
+        h.configuration.update(haptics: enabled)
+        h.open()
+        let chosen = profile?.modes.last ?? .zoom
+        let before = h.feedback
+        h.input.highlight(chosen, feedback: false) // Wedge mouse-down is silent.
+        check(h.feedback == before, "Press highlighting never adds a selection pulse")
+        h.input.confirmSelection(chosen) // Also used by native accessibility buttons.
+        check(h.mode == chosen && h.input.picker == nil, "Mode applies synchronously before confirmation")
+        check(h.confirmations.count == 1 && h.confirmations[0].selectedMode == chosen
+              && h.confirmations[0].profile == profile && h.dismissals == 0,
+              "Confirmation retains the chosen mode and layout without cancellation")
+        check(h.feedback == before + (enabled ? 1 : 0), "Exactly one confirmation pulse respects preferences")
+        h.input.confirmSelection(chosen)
+        check(h.commits.count == 1 && h.confirmations.count == 1, "Repeated confirmation is ignored")
+        h.report(.released, .Clockwise(1))
+        check(h.rotations.count == 1, "Rotation operates the new mode during its visual confirmation")
+        h.open()
+        h.input.confirmSelection()
+        check(h.confirmations.count == 2, "Reselecting the current mode also confirms")
+        h.open()
+        let cancellationFeedback = h.feedback
+        h.input.cancel()
+        h.clock.advance(20)
+        check(h.confirmations.count == 2 && h.feedback == cancellationFeedback && h.dismissals == 1,
+              "Cancellation and stale idle timers never confirm or pulse")
+    }
+}
+do {
+    let h = Harness()
+    h.open()
+    let before = h.feedback
+    h.input.onCommit = { _ in false }
+    h.input.confirmSelection(.zoom)
+    check(h.mode == .scrolling && h.confirmations.isEmpty && h.feedback == before && h.dismissals == 1,
+          "Rejected commits dismiss without claiming success")
+}
+do {
+    let h = Harness()
+    h.open()
+    let before = h.feedback
+    h.input.onCommit = { _ in h.input.cancel(); return true }
+    h.input.confirmSelection()
+    check(h.confirmations.isEmpty && h.feedback == before, "Context invalidation during commit prevents success feedback")
+}
+do {
+    let h = Harness()
+    h.open()
+    let before = h.feedback
+    h.input.onConfirmation = { _ in h.input.cancel() }
+    h.input.confirmSelection(.zoom)
+    check(h.mode == .zoom && h.feedback == before,
+          "Invalidation during presentation does not enqueue a stale pulse")
+}
+// Hardware jobs can wait without blocking UI queries or applying stale state.
+do {
+    var work: [() -> Void] = []
+    var events: [String] = []
+    let configuration = DialConfigurationController { value in
+        events.append("configure \(value.ticksPerRevolution)")
+        return true
+    }
+    configuration.update(haptics: true)
+    configuration.didConnect()
+    let commands = DialHardwareCommands(configuration: configuration, schedule: { work.append($0) },
+                                        impact: { events.append("pulse") })
+    func drain() { let jobs = work; work.removeAll(); jobs.forEach { $0() } }
+    commands.setMenuNavigationActive(true)
+    let menuGeneration = configuration.withInputContext { 0 }.generation
+    events.removeAll()
+    commands.feedback()
+    commands.setMenuNavigationActive(false)
+    check(events.isEmpty, "Confirmation pulse and sensitivity restoration never do inline hardware I/O")
+    check(!commands.acceptsRotation(menuGeneration), "Queued menu ticks are rejected as soon as restoration is requested")
+    drain()
+    check(events == ["pulse", "configure 36"], "Confirmation pulse precedes the potentially slow sensitivity reset")
+    let normalGeneration = configuration.withInputContext { 0 }.generation
+    check(commands.acceptsRotation(normalGeneration) && !commands.acceptsRotation(menuGeneration),
+          "Only fresh normal ticks resume after asynchronous restoration")
+
+    commands.setMenuNavigationActive(true)
+    commands.setMenuNavigationActive(false)
+    commands.setMenuNavigationActive(true)
+    events.removeAll()
+    drain()
+    check(events.isEmpty, "An old queued restore cannot overwrite a reopened menu's sensitivity")
+    let reopenedGeneration = configuration.withInputContext { 0 }.generation
+    check(commands.acceptsRotation(reopenedGeneration), "Reopened menus accept their current tick generation")
+    commands.feedback()
+    commands.feedback()
+    drain()
+    check(events == ["pulse"], "A newer pulse replaces stale queued browsing feedback")
+    events.removeAll()
+    commands.feedback()
+    commands.cancelFeedback()
+    drain()
+    check(events.isEmpty, "Lifecycle cancellation drops queued haptics")
+    commands.feedback()
+    configuration.didDisconnect()
+    configuration.didConnect()
+    events.removeAll()
+    drain()
+    check(events.isEmpty, "A pulse queued for an old connection is never played after reconnect")
+    commands.feedback()
+    configuration.update(haptics: false)
+    events.removeAll()
+    commands.feedback()
+    drain()
+    check(events.isEmpty, "Disabling haptics silences pending and new pulses")
+}
+do {
+    let configuration = DialConfigurationController { _ in true }
+    configuration.update(haptics: true)
+    configuration.didConnect()
+    let generation = configuration.withInputContext { 0 }.generation
+    let began = DispatchSemaphore(value: 0)
+    let finish = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+        configuration.performFeedback {
+            began.signal()
+            _ = finish.wait(timeout: .now() + 5)
+        }
+        finished.signal()
+    }
+    check(began.wait(timeout: .now() + 2) == .success, "Test hardware write begins")
+    let queried = DispatchSemaphore(value: 0)
+    var accepted = false
+    DispatchQueue.global().async {
+        accepted = configuration.acceptsRotation(generation) && configuration.feedbackToken != nil
+        queried.signal()
+    }
+    let responsive = queried.wait(timeout: .now() + 0.5) == .success
+    finish.signal()
+    _ = finished.wait(timeout: .now() + 2)
+    if !responsive { _ = queried.wait(timeout: .now() + 2) }
+    check(responsive && accepted, "UI generation and feedback queries do not wait for an in-flight HID write")
+}
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

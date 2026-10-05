@@ -180,6 +180,10 @@ class Dial
     private var run: Bool = false
     let device = Device()
     private let configuration: DialConfigurationController
+    private let hardwareQueue = DispatchQueue(label: "MacDial.hardware-feedback", qos: .userInteractive)
+    private let commands: DialHardwareCommands
+    private let connectionLock = NSLock()
+    private var cachedSerialNumber: String?
     private let semaphore = DispatchSemaphore(value: 0)
     
     var onInput: ((InputReport, TimeInterval, UInt64) -> Void)?
@@ -192,17 +196,31 @@ class Dial
 
     @discardableResult
     func setMenuNavigationActive(_ active: Bool) -> Bool {
-        let success = configuration.setMenuNavigationActive(active)
+        let success = commands.setMenuNavigationActive(active)
         if !success { print("Could not apply Dial menu configuration; restoring normal sensitivity.") }
         return success
     }
 
     func acceptsRotation(_ generation: UInt64) -> Bool {
-        configuration.acceptsRotation(generation)
+        commands.acceptsRotation(generation)
     }
 
     func feedback() {
-        configuration.performFeedback { device.impact() }
+        commands.feedback()
+    }
+
+    func cancelFeedback() {
+        commands.cancelFeedback()
+    }
+
+    var connectedSerialNumber: String? {
+        connectionLock.lock(); defer { connectionLock.unlock() }
+        return cachedSerialNumber
+    }
+
+    private func setConnectedSerialNumber(_ serial: String?) {
+        connectionLock.lock(); defer { connectionLock.unlock() }
+        cachedSerialNumber = serial
     }
     
     var scrollDirection: Int {
@@ -218,6 +236,10 @@ class Dial
     init() {
         let device = self.device
         configuration = DialConfigurationController(apply: { device.configure($0) })
+        let queue = hardwareQueue
+        commands = DialHardwareCommands(configuration: configuration,
+                                        schedule: { work in queue.async(execute: work) },
+                                        impact: { device.impact() })
         hid_init()
     }
     
@@ -235,6 +257,9 @@ class Dial
     
     func stop() {
         run = false;
+        commands.invalidate()
+        hardwareQueue.sync {} // Finish any write already in flight before closing HID.
+        setConnectedSerialNumber(nil)
         configuration.shutdown()
         if let thread = self.thread {
             semaphore.signal()
@@ -270,12 +295,15 @@ class Dial
             if !device.isConnected {
                 print("Trying to open device...")
                 if device.connect() {
-                    print("Device \(device.serialNumber) opened.")
+                    let serial = device.serialNumber
+                    print("Device \(serial) opened.")
                     if !configuration.didConnect() {
                         print("Could not configure Dial after connecting.")
                         device.disconnect()
                         configuration.didDisconnect()
                         onDisconnected?()
+                    } else {
+                        setConnectedSerialNumber(serial)
                     }
                 } else {
                     print("Device couldn't be opened.")
@@ -296,6 +324,8 @@ class Dial
                     break
                 case nil:
                     print("Device disconnected.")
+                    commands.invalidate()
+                    setConnectedSerialNumber(nil)
                     configuration.didDisconnect()
                     onDisconnected?()
                 }

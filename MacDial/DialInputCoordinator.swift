@@ -8,7 +8,8 @@ final class DialInputCoordinator {
     var onShortPress: (() -> Void)?
     var onRotation: ((Dial.Rotation, Int) -> Void)?
     var onCancelAction: (() -> Void)?
-    var onCommit: ((Mode) -> Void)?
+    var onCommit: ((Mode) -> Bool)?
+    var onConfirmation: ((ModePickerState) -> Void)?
     var onPickerChanged: ((ModePickerState?) -> Void)?
     var onFeedback: (() -> Void)?
     var onMenuNavigationChanged: ((Bool) -> Bool)?
@@ -74,6 +75,11 @@ final class DialInputCoordinator {
             return // Consume the release report's rotation too.
         }
 
+        if changed, pressed, wasArmed {
+            commitSelection()
+            return // Consume this press, its rotation, and the eventual release.
+        }
+
         if changed {
             if pressed {
                 if picker == nil { onPressBegan?() }
@@ -107,25 +113,49 @@ final class DialInputCoordinator {
         publish()
     }
 
-    func highlight(_ mode: Mode) {
+    func highlight(_ mode: Mode, feedback: Bool = true) {
         guard picker?.isArmed == true, !physicallyPressed else { return }
         if picker?.select(mode) == true {
-            onFeedback?()
+            if feedback { onFeedback?() }
             publish()
         } else {
             activity()
         }
     }
 
-    func confirmSelection() {
+    func confirmSelection(_ selectedMode: Mode? = nil) {
+        if let mode = selectedMode {
+            guard picker?.availableModes.contains(mode) == true else { return }
+            guard picker?.isArmed == true, !physicallyPressed else { return }
+            picker?.select(mode)
+        }
         guard let picker = picker, picker.isArmed, !physicallyPressed else { return }
-        let mode = picker.selectedMode
-        cancel()
-        onCommit?(mode)
-        onFeedback?()
+        commitSelection(picker)
+    }
+
+    private func commitSelection(_ selection: ModePickerState? = nil) {
+        guard let picker = selection ?? picker, picker.isArmed else { return }
+        clearPicker(restoreHardware: false)
+        // Enqueue the confirmation pulse before restoring normal sensitivity.
+        // The production callbacks perform HID work away from the UI thread.
+        defer { if self.picker == nil { _ = onMenuNavigationChanged?(false) } }
+        let generation = pickerGeneration
+        if onCommit?(picker.selectedMode) == true, generation == pickerGeneration {
+            onConfirmation?(picker)
+            guard generation == pickerGeneration else { return }
+            onFeedback?()
+        } else if generation == pickerGeneration {
+            onPickerChanged?(nil)
+        }
     }
 
     func cancel() {
+        let wasOpen = picker != nil
+        clearPicker()
+        if wasOpen { onPickerChanged?(nil) }
+    }
+
+    private func clearPicker(restoreHardware: Bool = true) {
         button.cancel()
         suppressUntilRelease = suppressUntilRelease || physicallyPressed
         idleTimer?.cancel()
@@ -133,11 +163,10 @@ final class DialInputCoordinator {
         idleGeneration += 1
         let wasOpen = picker != nil
         picker = nil
+        pickerGeneration += 1
         onCancelAction?()
-        if wasOpen {
-            pickerGeneration += 1
+        if wasOpen && restoreHardware {
             _ = onMenuNavigationChanged?(false)
-            onPickerChanged?(nil)
         }
     }
 
@@ -150,9 +179,7 @@ final class DialInputCoordinator {
     }
 
     private func longPressed() {
-        if picker != nil {
-            cancel()
-        } else {
+        if picker == nil {
             onCancelAction?()
             picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile(),
                                      startPosition: radialMenuStartPosition)

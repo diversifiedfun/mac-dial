@@ -360,7 +360,8 @@ class StatusBarController
             self.currentController.onRotate(rotation, direction)
         }
         input.onCancelAction = { [weak self] in self?.currentController.onCancel() }
-        input.onCommit = { [weak self] mode in self?.applyMode(mode) }
+        input.onCommit = { [weak self] mode in self?.applyMode(mode) ?? false }
+        input.onConfirmation = { [weak self] state in self?.radialMenu.confirm(state) }
         input.onFeedback = { [weak self] in self?.dial.feedback() }
         input.onMenuNavigationChanged = { [weak self] active in
             self?.dial.setMenuNavigationActive(active) ?? false
@@ -374,11 +375,11 @@ class StatusBarController
             else { self.radialMenu.dismiss() }
         }
         radialMenu.view.onHighlight = { [weak self] mode in self?.input.highlight(mode) }
+        radialMenu.view.onPressHighlight = { [weak self] mode in self?.input.highlight(mode, feedback: false) }
         radialMenu.view.onMove = { [weak self] steps in self?.input.moveSelection(by: steps) }
         radialMenu.view.onConfirm = { [weak self] in self?.input.confirmSelection() }
         radialMenu.view.onSelect = { [weak self] mode in
-            self?.input.highlight(mode)
-            self?.input.confirmSelection()
+            self?.input.confirmSelection(mode)
         }
         radialMenu.view.onCancel = { [weak self] in self?.cancelPendingInput() }
 
@@ -430,8 +431,7 @@ class StatusBarController
             menuItems.connectionStatus.title = "Accessibility permission required"
             return
         }
-        if dial.device.isConnected {
-            let serialNumber = dial.device.serialNumber
+        if let serialNumber = dial.connectedSerialNumber {
             menuItems.connectionStatus.title = "Surface Dial '\(serialNumber)' connected"
         }
         else {
@@ -511,12 +511,16 @@ class StatusBarController
 
     func cancelPendingInput() {
         inputGate.invalidate()
+        dial.cancelFeedback()
         input.cancel()
+        radialMenu.dismiss()
     }
 
-    private func applyMode(_ mode: Mode) {
-        guard !refreshForegroundApplication(), modeContext.select(mode) else { return }
+    @discardableResult
+    private func applyMode(_ mode: Mode) -> Bool {
+        guard !refreshForegroundApplication(), modeContext.select(mode) else { return false }
         refreshModeUI()
+        return true
     }
     
     @objc func setSensitivity(sender: AnyObject) {

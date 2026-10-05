@@ -22,7 +22,7 @@ enum ScrollStyle: String, CaseIterable {
 
     // Freewheel keeps slow-tick precision but accelerates faster turns more
     // strongly and dissipates their momentum over a longer, bounded coast.
-    fileprivate var maximumGain: Double { self == .freewheel ? 6 : 4 }
+    fileprivate var maximumPixelsPerTick: Double { self == .freewheel ? 144 : 96 }
     fileprivate var coastDuration: TimeInterval { self == .freewheel ? 1.0 : 0.30 }
     fileprivate var decay: TimeInterval { self == .freewheel ? 0.25 : 0.075 }
     fileprivate var coastVelocityScale: Double { self == .freewheel ? 0.5 : 0.25 }
@@ -58,6 +58,8 @@ final class ScrollController: Controller {
     private var momentumActive = false
     private var momentumStart: TimeInterval?
     private var coastVelocity = 0.0
+    private var smoothedTickRate = 0.0
+    private var consecutiveReports = 0
     private struct Impulse {
         let start: TimeInterval
         let distance: Double
@@ -67,6 +69,8 @@ final class ScrollController: Controller {
     private static let frameInterval = 1.0 / 120
     private static let interpolation = 0.08
     private static let gestureTimeout = 0.10
+    private static let minimumPixelsPerTick = 2.0
+    private static let speedResponse = 0.12
 
     init(style: ScrollStyle = .smooth,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -112,6 +116,8 @@ final class ScrollController: Controller {
         remainder = 0
         momentumStart = nil
         coastVelocity = 0
+        smoothedTickRate = 0
+        consecutiveReports = 0
         lastRotate = nil
         direction = 0
     }
@@ -143,12 +149,26 @@ final class ScrollController: Controller {
                 post(event)
             }
         } else {
-            let gain = 1 + (style.maximumGain - 1) * max(0, min(1, 1 - interval / 0.15))
-            let distance = steps * 24 * gain
+            if lastRotate == nil || interval >= Self.gestureTimeout {
+                smoothedTickRate = 0
+                consecutiveReports = 1
+            } else {
+                // Estimate speed gradually. One closely spaced pair of reports
+                // must not turn a fine adjustment into a large accelerated jump.
+                let rate = min(80, abs(steps) / max(interval, Self.frameInterval))
+                let blend = 1 - exp(-interval / Self.speedResponse)
+                smoothedTickRate += (rate - smoothedTickRate) * blend
+                consecutiveReports += 1
+            }
+            let speed = max(0, min(1, (smoothedTickRate - 8) / 40))
+            let pixelsPerTick = Self.minimumPixelsPerTick
+                + (style.maximumPixelsPerTick - Self.minimumPixelsPerTick) * speed * speed
+            let distance = steps * pixelsPerTick
             impulses.append(Impulse(start: time, distance: distance))
-            // Only repeated fast reports qualify for a coast; a single tick
-            // always finishes at exactly 24 pixels, including fractional frames.
-            coastVelocity = lastRotate != nil && interval < Self.gestureTimeout
+            // Fine adjustments have no added coast. Inertia requires several
+            // reports and a sustained speed, independently of frame cadence.
+            coastVelocity = consecutiveReports >= 3 && smoothedTickRate >= 12
+                && interval < Self.gestureTimeout
                 ? Double(newDirection) * min(style.maximumCoastVelocity, abs(distance) / max(interval, Self.frameInterval) * style.coastVelocityScale)
                 : 0
             if timer == nil {
@@ -197,7 +217,9 @@ final class ScrollController: Controller {
             var distance = 0.0
             for index in impulses.indices {
                 let progress = max(0, min(1, (time - impulses[index].start) / Self.interpolation))
-                let cumulative = impulses[index].distance * (1 - pow(1 - progress, 3))
+                // Uniformly distribute each impulse instead of front-loading
+                // most of a tick into its first few animation frames.
+                let cumulative = impulses[index].distance * progress
                 distance += cumulative - impulses[index].delivered
                 impulses[index].delivered = cumulative
             }

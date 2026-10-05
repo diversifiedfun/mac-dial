@@ -1554,9 +1554,10 @@ final class ScrollHarness {
     var pixels: [Int64] { events.map { $0.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) } }
     var momentum: [CGEvent] { events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 } }
     func fastTurn() {
-        controller.onRotate(.Clockwise(1), 1)
-        advance(0.03)
-        controller.onRotate(.Clockwise(1), 1)
+        for index in 0..<12 {
+            if index > 0 { advance(0.02) }
+            controller.onRotate(.Clockwise(1), 1)
+        }
     }
 }
 
@@ -1566,9 +1567,9 @@ for style in [ScrollStyle.smooth, .freewheel] {
         h.controller.setStyle(style)
         h.controller.onRotate(.Clockwise(1), direction)
         h.advance(0.025)
-        check(h.pixels.count >= 2 && h.pixels.allSatisfy { abs($0) < 24 }, "Animated scrolling splits a tick into small frames")
+        check(h.pixels == [Int64(direction)], "A slow tick begins with one pixel, without an initial jump")
         h.advance(0.2)
-        check(h.pixels.reduce(0, +) == 24 * direction && h.momentum.isEmpty, "An isolated tick preserves 24 pixels without coast")
+        check(h.pixels.reduce(0, +) == 2 * direction && h.momentum.isEmpty, "An isolated tick moves only two pixels without coast")
         check(h.events.first?.getIntegerValueField(.scrollWheelEventScrollPhase) == 1
               && h.events.last?.getIntegerValueField(.scrollWheelEventScrollPhase) == 4, "Direct scroll phases balance")
         check(h.clock.pending.isEmpty, "Idle scrolling schedules no more work")
@@ -1587,7 +1588,8 @@ for style in [ScrollStyle.smooth, .freewheel] {
         h.advance(1.3)
         let direct = h.events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 }
         let distance = direct.reduce(Int64(0)) { $0 + $1.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) }
-        check(abs(Double(distance) - (24 + 24 * (style == .freewheel ? 5.0 : 3.4))) <= 1, "Overlapping impulses preserve their accelerated distance")
+        check(distance > 24 && distance < 12 * (style == .freewheel ? 144 : 96),
+              "Sustained fast input accelerates gradually within the distance ceiling")
         check(h.momentum.first?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 1
               && h.momentum.last?.getIntegerValueField(.scrollWheelEventMomentumPhase) == 3, "Momentum begins and ends with Quartz phases")
         check(h.momentum.contains { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 2 }, "Momentum has continuation frames")
@@ -1599,6 +1601,54 @@ for style in [ScrollStyle.smooth, .freewheel] {
         let ended = h.events.firstIndex { $0.getIntegerValueField(.scrollWheelEventScrollPhase) == 4 }!
         check(h.eventTimes.last! - h.eventTimes[ended] <= (style == .freewheel ? 1.0 : 0.30) + 1.0 / 120 + 0.00001,
               "Momentum terminates within its style limit plus one scheduling frame")
+    }
+
+    // A small adjustment must stay precise even when two reports land close together.
+    do {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        h.controller.onRotate(.Clockwise(1), 1)
+        h.advance(0.03)
+        h.controller.onRotate(.Clockwise(1), 1)
+        h.advance(1.3)
+        check(h.pixels.reduce(0, +) == 4 && h.momentum.isEmpty,
+              "Two nearby ticks remain a four-pixel adjustment without inertia")
+        check(h.pixels.allSatisfy { abs($0) <= 1 }, "Fine adjustments are delivered in one-pixel increments")
+    }
+
+    do {
+        let h = ScrollHarness()
+        h.controller.setStyle(style)
+        for _ in 0..<6 {
+            h.controller.onRotate(.Clockwise(1), -1)
+            h.advance(0.25)
+        }
+        check(h.pixels.reduce(0, +) == -12 && h.momentum.isEmpty,
+              "Repeated slow turns retain two-pixel precision without building inertia")
+        h.fastTurn()
+        h.advance(1.3)
+        let count = h.events.count
+        h.controller.onRotate(.Clockwise(1), 1)
+        h.advance(0.2)
+        check(h.pixels.dropFirst(count).reduce(0, +) == 2,
+              "A fresh adjustment after coasting restarts at precision speed")
+    }
+
+    do {
+        var distances: [Int64] = []
+        for spacing in [0.25, 0.06, 0.02] {
+            let h = ScrollHarness()
+            h.controller.setStyle(style)
+            for index in 0..<12 {
+                if index > 0 { h.advance(spacing) }
+                h.controller.onRotate(.Clockwise(1), 1)
+            }
+            h.advance(1.3)
+            distances.append(h.events.filter { $0.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0 }
+                .reduce(0) { $0 + $1.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) })
+        }
+        check(distances[0] == 24 && distances[0] < distances[1] && distances[1] < distances[2],
+              "The same turn scrolls progressively farther at slow, medium, and fast speeds")
     }
 
     // Moving the pointer during inertia must never replay the gesture's old
@@ -1684,7 +1734,7 @@ do {
     check(smooth.clock.pending.isEmpty && !freewheel.clock.pending.isEmpty,
           "Freewheel continues gliding after Smooth has stopped")
     freewheel.advance(0.8)
-    check(freewheel.pixels.reduce(0, +) > smooth.pixels.reduce(0, +) * 3,
+    check(Double(freewheel.pixels.reduce(0, +)) > Double(smooth.pixels.reduce(0, +)) * 1.5,
           "Freewheel covers substantially more of a long page for the same fast turn")
     check(freewheel.clock.pending.isEmpty, "Freewheel stops scheduling when its longer glide ends")
 }
@@ -1727,7 +1777,7 @@ for sensitivity in WheelSensitivity.allCases {
     let h = ScrollHarness()
     h.controller.onRotate(.Clockwise(sensitivity.normalTicksPerRevolution), -1)
     h.advance(0.2)
-    check(h.pixels.reduce(0, +) == Int64(-24 * sensitivity.normalTicksPerRevolution), "Every sensitivity preserves batched tick distance")
+    check(h.pixels.reduce(0, +) == Int64(-2 * sensitivity.normalTicksPerRevolution), "Every sensitivity preserves fine batched tick distance")
 }
 
 do {

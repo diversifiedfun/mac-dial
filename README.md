@@ -31,16 +31,22 @@ cancelling, or confirming the picker.
 
 ### Scroll styles
 
-**Smooth** is the default. Each tick is spread over approximately 80 ms, with
-small updates scheduled at 120 Hz. Repeated faster turns add a short decelerating
-coast, capped at 300 ms after the direct scroll ends. An isolated slow tick moves
-24 pixels without extra coast. Reversing direction discards the old glide.
+**Smooth** is the default. A slow, isolated tick moves just **2 pixels**, spread
+uniformly over approximately 80 ms in one-pixel increments. Repeated faster
+turns gradually increase the distance per tick, up to 96 pixels, rather than
+accelerating abruptly on the second tick. Tiny adjustments have no extra coast;
+inertia requires sustained faster input and lasts at most 300 ms.
 **Stepped** preserves the previous immediate, accelerated scroll jumps.
-**Freewheel** is for long pages: faster turns accelerate up to 6×, compared with
-Smooth’s 4×, and coast for up to one second after the direct scroll ends. Slow,
-isolated ticks still move 24 pixels without extra coast. Press to stop or reverse
-to discard the old glide, just as in Smooth. The pointer remains free to move
+**Freewheel** uses the same slow-tick precision, with a higher fast-turn ceiling
+of 144 pixels per tick and up to one second of coast for long pages. Press to
+stop or reverse to discard the old glide. The pointer remains free to move
 throughout either style’s glide; inertia events never restore an old position.
+
+Wheel Sensitivity determines the physical turn needed for a report: Low = 20°,
+Medium = 10°, High = 5°, and Extreme = 1°. Higher sensitivity detects smaller
+turns and produces more ticks per revolution. The app cannot respond to movement
+between hardware reports, but each report can produce small pixel increments.
+Existing sensitivity preferences are preserved.
 
 Short-click in Scroll to cycle **Smooth → Stepped → Freewheel → Smooth**, or use **Scroll Style → Smooth / Stepped / Freewheel**
 in the menu bar. The choice is remembered globally across apps and restarts.

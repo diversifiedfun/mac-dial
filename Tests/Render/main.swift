@@ -71,6 +71,12 @@ for profile: AppProfile? in [nil, .lightroom] {
                 check(button.accessibilityHelp()?.contains(guidance) == true,
                       "Remove exposes the rating guidance to accessibility users")
             }
+            if candidate == .undoRedo {
+                let guidance = "Turn left to undo; turn right to redo, one step per tick. Click to undo once. Requires Command+Z and Shift+Command+Z support in the focused app."
+                check(button.toolTip == guidance, "Undo/Redo exposes its actions and shortcut requirements to pointer users")
+                check(button.accessibilityHelp()?.contains(guidance) == true,
+                      "Undo/Redo exposes its actions and shortcut requirements to accessibility users")
+            }
             check((button.accessibilityValue() as? Int) == (candidate == mode ? 1 : 0), "Selected value is accessible")
             check(button.image != nil && button.isEnabled, "Icons are present and actionable after release")
             check(button.frame.width >= 44 && button.frame.height >= 44, "Icons have adequate pointer targets")
@@ -81,6 +87,14 @@ for profile: AppProfile? in [nil, .lightroom] {
         let visibleLabels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
         check(visibleLabels.allSatisfy { $0.attributedStringValue.size().width <= $0.bounds.width },
               "All center text fits without truncation")
+        check(controls.enumerated().allSatisfy { index, button in
+            let frame = button.convert(button.bounds, to: view)
+            return controls.dropFirst(index + 1).allSatisfy { !frame.intersects($0.convert($0.bounds, to: view)) }
+        }, "Native pointer targets do not overlap in either ring")
+        if mode == .undoRedo {
+            check(visibleLabels.map(\.stringValue) == ["Undo/Redo", "Turn to choose", "Click to select"],
+                  "Undo/Redo's center explains picker navigation rather than triggering history actions")
+        }
         if profile != nil {
             let group = view.subviews.first { $0.accessibilityRole() == .group && $0.accessibilityLabel() == "Lightroom modes" }
             check(group != nil && buttons(in: group!).count == 3, "Lightroom children have an accessible group")
@@ -88,6 +102,14 @@ for profile: AppProfile? in [nil, .lightroom] {
     }
 }
 
+for profile: AppProfile? in [nil, .lightroom] {
+    var state = ModePickerState(selectedMode: .undoRedo, profile: profile)
+    state.isArmed = true
+    update(state)
+    view.updateDisplayOptions(reduceTransparency: true, increasedContrast: true)
+    try render((profile == nil ? "" : "lightroom-") + "undoRedo-reduced-transparency-contrast")
+}
+view.updateDisplayOptions(reduceTransparency: false, increasedContrast: false)
 update(ModePickerState(selectedMode: .scrolling))
 check(buttons(in: view).allSatisfy { !$0.isEnabled }, "Opening hold disables selection")
 try render("opening")
@@ -145,15 +167,17 @@ for segment in view.menuLayout.segments {
     view.mouseDown(with: mouse(.leftMouseDown, at: location))
     view.mouseUp(with: mouse(.leftMouseUp, at: location))
 }
-check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips the app parent and selects all six leaves")
-check(highlights.count == 12, "The parent cannot be highlighted")
-let parentPoint = view.menuLayout.point(angle: 180, radius: 111)
+check(selected == AppProfile.lightroom.availableModes, "Pointer selection skips the app parent and selects all seven leaves")
+check(highlights.count == AppProfile.lightroom.availableModes.count * 2, "The parent cannot be highlighted")
+let parent = view.menuLayout.appGroupSegment!
+let parentPoint = view.menuLayout.point(angle: parent.angle, radius: parent.iconRadius)
 check(!(view.hitTest(parentPoint) is NSButton), "The app icon is not an actionable control")
 let selectedBefore = selected.count
 state.isArmed = false
 update(state)
 check(buttons(in: view).allSatisfy { !$0.isEnabled }, "Opening hold disables both rings")
-let childPoint = view.menuLayout.point(angle: 180, radius: 183)
+let child = view.menuLayout.segment(for: .lightroomFineTune)!
+let childPoint = view.menuLayout.point(angle: child.angle, radius: child.iconRadius)
 view.mouseDown(with: mouse(.leftMouseDown, at: childPoint))
 view.mouseUp(with: mouse(.leftMouseUp, at: childPoint))
 check(selected.count == selectedBefore, "Opening hold cannot activate an outer child")
@@ -168,5 +192,6 @@ view.onCancel = { didCancel = true }
 view.mouseDown(with: mouse(.leftMouseDown, at: view.menuLayout.point(angle: 0, radius: 180)))
 check(didCancel, "Empty space outside the partial outer ring cancels")
 update(ModePickerState(selectedMode: .zoom))
-check(view.bounds.width == 300 && buttons(in: view).count == 3, "Leaving app context restores the original size and choices")
+check(view.bounds.width == 300 && buttons(in: view).count == Mode.generalModes.count,
+      "Leaving app context restores the standard size and choices")
 print("Passed \(checks) native view checks; rendered general and Lightroom states to \(destination.path)")

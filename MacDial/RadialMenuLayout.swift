@@ -9,24 +9,33 @@ struct RadialMenuLayout {
         let innerRadius: CGFloat
         let outerRadius: CGFloat
         var iconRadius: CGFloat { outerRadius == 150 ? 108 : (innerRadius + outerRadius) / 2 }
+        var startAngle: CGFloat { angle + sweep / 2 }
+        var endAngle: CGFloat { angle - sweep / 2 }
     }
 
     let profile: AppProfile?
     var diameter: CGFloat { profile == nil ? 300 : 432 }
     var center: NSPoint { NSPoint(x: diameter / 2, y: diameter / 2) }
     var coreFrame: NSRect { NSRect(x: center.x - 150, y: center.y - 150, width: 300, height: 300) }
+    private var innerSweep: CGFloat { 360 / CGFloat(Mode.generalModes.count + (profile == nil ? 0 : 1)) }
+
+    var appGroupSegment: Segment? {
+        guard profile != nil else { return nil }
+        let angle = (90 - CGFloat(Mode.generalModes.count) * innerSweep + 360).truncatingRemainder(dividingBy: 360)
+        return Segment(mode: nil, angle: angle, sweep: innerSweep, innerRadius: 72, outerRadius: 150)
+    }
 
     var segments: [Segment] {
-        let sweep: CGFloat = profile == nil ? 120 : 90
+        let sweep = innerSweep
         var result = Mode.generalModes.enumerated().map { index, mode in
             Segment(mode: mode, angle: 90 - CGFloat(index) * sweep, sweep: sweep,
                     innerRadius: 72, outerRadius: 150)
         }
-        if let profile = profile {
-            result.append(Segment(mode: nil, angle: 180, sweep: 90, innerRadius: 72, outerRadius: 150))
-            let childSweep = 90 / CGFloat(max(1, profile.modes.count))
+        if let profile = profile, let group = appGroupSegment {
+            result.append(group)
+            let childSweep = group.sweep / CGFloat(max(1, profile.modes.count))
             result += profile.modes.enumerated().map { index, mode in
-                Segment(mode: mode, angle: 225 - childSweep * (CGFloat(index) + 0.5),
+                Segment(mode: mode, angle: group.startAngle - childSweep * (CGFloat(index) + 0.5),
                         sweep: childSweep, innerRadius: 150, outerRadius: 216)
             }
         }
@@ -51,8 +60,8 @@ struct RadialMenuLayout {
 
     func path(for segment: Segment) -> NSBezierPath {
         let path = NSBezierPath()
-        let start = segment.angle + segment.sweep / 2
-        let end = segment.angle - segment.sweep / 2
+        let start = segment.startAngle
+        let end = segment.endAngle
         path.move(to: point(angle: start, radius: segment.outerRadius))
         path.appendArc(withCenter: center, radius: segment.outerRadius, startAngle: start, endAngle: end, clockwise: true)
         path.line(to: point(angle: end, radius: segment.innerRadius))
@@ -63,12 +72,12 @@ struct RadialMenuLayout {
 
     var outline: NSBezierPath {
         // One contour avoids winding-rule holes and seams in the material.
-        guard profile != nil else { return NSBezierPath(ovalIn: coreFrame) }
+        guard let group = appGroupSegment else { return NSBezierPath(ovalIn: coreFrame) }
         let path = NSBezierPath()
-        path.move(to: point(angle: 135, radius: 150))
-        path.appendArc(withCenter: center, radius: 150, startAngle: 135, endAngle: -135, clockwise: true)
-        path.line(to: point(angle: 225, radius: 216))
-        path.appendArc(withCenter: center, radius: 216, startAngle: 225, endAngle: 135, clockwise: true)
+        path.move(to: point(angle: group.endAngle, radius: 150))
+        path.appendArc(withCenter: center, radius: 150, startAngle: group.endAngle, endAngle: group.startAngle, clockwise: true)
+        path.line(to: point(angle: group.startAngle, radius: 216))
+        path.appendArc(withCenter: center, radius: 216, startAngle: group.startAngle, endAngle: group.endAngle, clockwise: true)
         path.close()
         return path
     }

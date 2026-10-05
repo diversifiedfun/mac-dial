@@ -4,11 +4,12 @@ enum Mode: String, CaseIterable {
     case scrolling
     case playback
     case zoom
+    case undoRedo
     case lightroomCrop
     case lightroomFineTune
     case lightroomBrush
 
-    static let generalModes: [Mode] = [.scrolling, .playback, .zoom]
+    static let generalModes: [Mode] = [.scrolling, .playback, .zoom, .undoRedo]
 
     var isLightroom: Bool { AppProfile.lightroom.modes.contains(self) }
 
@@ -17,6 +18,7 @@ enum Mode: String, CaseIterable {
         case .scrolling: return "Scroll"
         case .playback: return "Playback"
         case .zoom: return "Zoom"
+        case .undoRedo: return "Undo/Redo"
         case .lightroomCrop: return "Crop & Browse"
         case .lightroomFineTune: return "Fine Tune"
         case .lightroomBrush: return "Remove"
@@ -28,6 +30,7 @@ enum Mode: String, CaseIterable {
         case .scrolling: return "arrow.up.arrow.down"
         case .playback: return "speaker.wave.2"
         case .zoom: return "plus.magnifyingglass"
+        case .undoRedo: return "arrow.uturn.backward"
         case .lightroomCrop: return "crop"
         case .lightroomFineTune: return "slider.horizontal.3"
         case .lightroomBrush: return "paintbrush"
@@ -53,8 +56,13 @@ enum Mode: String, CaseIterable {
     }
 
     var usageHelp: String? {
-        guard self == .lightroomBrush else { return nil }
-        return "Activate Remove before turning. With Remove inactive, turning may change photo star ratings."
+        switch self {
+        case .undoRedo:
+            return "Turn left to undo; turn right to redo, one step per tick. Click to undo once. Requires Command+Z and Shift+Command+Z support in the focused app."
+        case .lightroomBrush:
+            return "Activate Remove before turning. With Remove inactive, turning may change photo star ratings."
+        default: return nil
+        }
     }
 
     // Preserve preferences written by earlier versions.

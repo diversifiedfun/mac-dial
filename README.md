@@ -12,10 +12,16 @@ You can find universal builds of the app under "releases". Note that these build
 
 The app will continously try to open any Surface Dial connected to the computer and then process input controls. You will need to pair and connect the device as any other bluetooth device.
 
-The app supports three general modes, plus contextual Lightroom Classic modes:
+The app supports four general modes, plus contextual Lightroom Classic modes:
 * Scroll mode: Turning the dial will result in scrolling. A short press clicks at the current cursor position when released. Press-and-hold dragging is not supported.
 * Playback mode: Turning the dial controls the system volume of your mac. Pressing the dial plays / pauses any current playback while a double click sends the "next" media action.
 * Zoom mode: Clockwise zooms in and counterclockwise zooms out in the focused app. A short press resets zoom. Uses Command+=, Command+-, and Command+0; the focused app must support those shortcuts. Zoom direction is independent of Scroll Direction.
+* Undo/Redo mode: Counterclockwise undoes and clockwise redoes one step per reported tick in the focused app. A short press undoes once on release; holding opens the mode picker. Uses Command+Z and Shift+Command+Z, so the focused app must support those shortcuts. Wheel Sensitivity controls the ticks per revolution; Scroll Direction does not reverse history actions. There is no acceleration or app-specific shortcut remapping.
+
+Undo/Redo sends complete key-down/key-up pairs to the foreground process. If
+focus changes during a rotation batch, the started pair finishes in the original
+app and the remaining steps stop. No history action is sent when opening,
+cancelling, or confirming the picker.
 
 ### Radial mode picker
 
@@ -24,12 +30,13 @@ click to select it. Choose **Menu Press Duration** in the menu bar, beside Wheel
 Sensitivity, to use **200, 300, 400, 500, or 600 ms**. The choice is saved across
 launches and applies to the next press, including a second hold to cancel the
 picker. A 300-point native macOS wheel opens at the pointer and stays within
-that display's visible area. Scroll is at the top, Playback at the lower right,
-and Zoom at the lower left. The center names the highlighted mode.
+that display's visible area. Four equal wedges place Scroll at the top, Playback
+at the right, Zoom at the bottom, and Undo/Redo at the left. The center names the
+highlighted mode and shows picker navigation instructions.
 
 The opening hold only opens the picker; releasing it arms selection. The current
 mode continues to be the saved mode until a subsequent short press confirms on
-release. Clockwise advances Scroll → Playback → Zoom, wrapping in either
+release. Clockwise advances Scroll → Playback → Zoom → Undo/Redo, wrapping in either
 direction. Each rotation tick advances exactly one choice, with one automatic
 haptic click when Haptics is enabled. Wheel Sensitivity controls menu spacing:
 
@@ -57,7 +64,7 @@ an earlier configuration is ignored while valid button releases are preserved.
 
 Scroll clicks now wait until a short press is released. This prevents a long
 press from clicking or dragging anything underneath the wheel. Menu gestures
-never send scroll, playback, or zoom actions; a confirmation report's rotation
+never send scroll, playback, zoom, or history actions; a confirmation report's rotation
 is also consumed. You can still select modes from the menu bar, and the chosen
 mode is remembered across launches using the existing preference values.
 
@@ -68,15 +75,15 @@ boundaries; Reduce Motion disables the opening fade.
 
 ### Lightroom Classic modes
 
-When **Lightroom Classic is the foreground app**, the wheel shows four equal
-inner wedges: Scroll (top), Playback (right), Zoom (bottom), and Lightroom (left).
-Three selectable icons extend outward from the Lightroom quarter in a 66-point
-outer arc. The inner wheel remains 300 points; contextual bounds are 432×432.
+When **Lightroom Classic is the foreground app**, the wheel shows five equal
+inner wedges: Scroll (top), then Playback, Zoom, Undo/Redo, and Lightroom clockwise.
+Three selectable icons equally divide the Lightroom wedge's outer arc, which is
+66 points thick. The inner wheel remains 300 points; contextual bounds are 432×432.
 Lightroom’s installed app icon identifies its parent wedge, which is a visual
 group rather than another selection target.
 
 Turning still follows one continuous sequence, with no extra click to enter a
-submenu: **Scroll → Playback → Zoom → Crop & Browse → Fine Tune → Remove**.
+submenu: **Scroll → Playback → Zoom → Undo/Redo → Crop & Browse → Fine Tune → Remove**.
 The sensitivity-dependent selection step, hold/release gesture, cancellation,
 keyboard navigation, and Haptics setting are the same in both layouts.
 The center shows the highlighted Lightroom mode’s turn and click actions.
@@ -104,8 +111,9 @@ On first use in Lightroom, the current general mode stays active until you
 explicitly select a mode. Later visits restore the last choice made in Lightroom,
 including a general mode if you selected one there. Leaving Lightroom restores
 your separately saved general mode. Both choices survive relaunches. Existing
-`mode` values (`scroll`, `playback`, `zoom`) remain compatible; the Lightroom
-choice is stored under `appMode.com.adobe.LightroomClassicCC7`. Remove retains
+`mode` values (`scroll`, `playback`, `zoom`) remain compatible; Undo/Redo uses
+`undoRedo`. The Lightroom choice is stored under
+`appMode.com.adobe.LightroomClassicCC7`. Remove retains
 the existing `lightroomBrush` preference value, so saved selections remain compatible.
 
 The menu bar also exposes a contextual Lightroom submenu and reflects the
@@ -170,15 +178,19 @@ require removing and re-adding it under Privacy & Security > Accessibility
   disables the idle timeout; the real app retains the 10-second timeout.
   Add `--build-only` to compile the preview without opening it.
 
-The Remove-mode Release build, strict code-signature verification,
-504 recording-only behavior checks, and 364 native-view checks pass.
+The Undo/Redo Release build, strict code-signature verification,
+603 recording-only behavior checks, and 546 native-view checks pass.
 The controller checks require access to native macOS services;
 in a restricted execution sandbox they can stall, so run them with that access.
 Automated checks cover the four menu sensitivity mappings, configuration failure
-recovery, restoration after dismissal, haptic suppression, queued rotation, all six
+recovery, restoration after dismissal, haptic suppression, queued rotation, all seven
 modes, app-specific persistence, stale-report rejection, app-switch cancellation,
 exact keyboard events and modifiers, group hit testing, accessible controls,
-text fit, and placement on displays with negative coordinates.
+text fit, nonoverlapping pointer targets, and placement on displays with negative
+coordinates. Undo/Redo checks also cover exact per-tick shortcuts, single-click
+undo, focus changes during a batch, menu gesture suppression, and both general
+and Lightroom persistence. Physical Dial input and live Undo/Redo shortcuts remain
+unverified; test rotation and clicking on a disposable document.
 
 Live Lightroom shortcut checks on a temporary virtual copy confirmed Q opens
 and closes Remove, ] increases its size from 14 to 15, and [ restores it to 14.

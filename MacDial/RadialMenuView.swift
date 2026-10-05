@@ -99,9 +99,9 @@ final class RadialMenuView: NSView {
         appGroup.frame = bounds
         appGroup.isHidden = menuLayout.profile == nil
         appGroup.setAccessibilityLabel("\(menuLayout.profile?.title ?? "App") modes")
-        if let profile = menuLayout.profile {
+        if let profile = menuLayout.profile, let group = menuLayout.appGroupSegment {
             appIcon.image = applicationIcon(for: profile)
-            let p = menuLayout.point(angle: 180, radius: 111)
+            let p = menuLayout.point(angle: group.angle, radius: group.iconRadius)
             appIcon.frame = NSRect(x: p.x - 21, y: p.y - 21, width: 42, height: 42)
         }
         for segment in menuLayout.segments {
@@ -121,10 +121,10 @@ final class RadialMenuView: NSView {
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityLabel("\(mode.title) mode")
             button.toolTip = mode.usageHelp
-            button.setAccessibilityHelp(mode.isLightroom
+            button.setAccessibilityHelp((mode.isLightroom
                 ? "Lightroom. \(mode.turnHint). \(mode.clickHint). Turn to choose; click to select."
-                    + (mode.usageHelp.map { " " + $0 } ?? "")
                 : "Select \(mode.title) for the Surface Dial")
+                    + (mode.usageHelp.map { " " + $0 } ?? ""))
             if menuLayout.profile?.modes.contains(mode) == true { appGroup.addSubview(button) }
             else { addSubview(button) }
             buttons[mode] = button

@@ -105,8 +105,8 @@ for (sensitivity, normal, menu) in [(WheelSensitivity.low, 18, 12), (.medium, 36
     check(!h.configuration.acceptsRotation(before), "Opening invalidates queued normal rotation")
     let writes = h.configurations.count
     let openingFeedback = h.feedback
-    for _ in 0..<7 { h.report(.released, .Clockwise(1)) }
-    check(h.input.picker?.selectedMode == .playback, "Seven clicks advance seven choices")
+    for _ in 0..<(Mode.generalModes.count * 2 + 1) { h.report(.released, .Clockwise(1)) }
+    check(h.input.picker?.selectedMode == .playback, "Multiple revolutions advance exactly one choice per tick")
     check(h.configurations.count == writes, "Selection does not repeatedly reprogram hardware")
     check(h.feedback == openingFeedback, "Dial rotation never adds a software haptic")
     h.input.moveSelection(by: 1)
@@ -399,9 +399,11 @@ do {
     check(h.commits == [.zoom] && h.clicks == 0, "Selecting the current mode closes without a mode action")
     h.open()
     h.input.moveSelection(by: 1)
+    check(h.input.picker?.selectedMode == .undoRedo, "Undo/Redo follows Zoom")
+    h.input.moveSelection(by: 1)
     check(h.input.picker?.selectedMode == .scrolling, "Clockwise selection wraps")
     h.input.moveSelection(by: -1)
-    check(h.input.picker?.selectedMode == .zoom, "Counterclockwise selection wraps")
+    check(h.input.picker?.selectedMode == .undoRedo, "Counterclockwise selection wraps")
     h.input.highlight(.playback)
     h.input.confirmSelection()
     check(h.mode == .playback && h.savedMode == "playback", "Pointer/keyboard confirmation commits")
@@ -512,7 +514,7 @@ do {
     picker.rotate(.CounterClockwise(2))
     check(picker.selectedMode == .scrolling, "Opposing multi-tick movement returns to the starting choice")
     picker.rotate(.Clockwise(2))
-    picker.select(.zoom)
+    picker.select(.undoRedo)
     picker.rotate(.Clockwise(1))
     check(picker.selectedMode == .scrolling, "One tick after pointer selection immediately advances")
     picker.rotate(.Clockwise(0))
@@ -582,32 +584,133 @@ zoom.onRotate(.Clockwise(0), 1)
 zoom.onRotate(.CounterClockwise(-1), -1)
 check(keys.count == 8, "Empty rotations must not generate keys")
 
+var historyKeys: [CGEvent] = []
+var historyPIDs: [pid_t] = []
+var historyForeground: pid_t? = 42
+let undoRedo = UndoRedoController(targetProcess: { historyForeground }, post: { event, pid in
+    historyKeys.append(event)
+    historyPIDs.append(pid)
+})
+undoRedo.onDown()
+undoRedo.onCancel()
+check(historyKeys.isEmpty, "Initial press and cancellation never undo")
+for direction in [1, -1] {
+    historyKeys.removeAll()
+    undoRedo.onRotate(.Clockwise(2), direction)
+    undoRedo.onRotate(.CounterClockwise(3), direction)
+    check(historyKeys.count == 10, "Each history tick emits one pair, including multi-step reversal")
+    check(historyKeys.allSatisfy { $0.getIntegerValueField(.keyboardEventKeycode) == Int64(kVK_ANSI_Z) },
+          "Both history actions use Z")
+    check(historyKeys.prefix(4).allSatisfy { $0.flags == [.maskCommand, .maskShift] }
+          && historyKeys.suffix(6).allSatisfy { $0.flags == .maskCommand },
+          "Right redoes and left undoes with exact modifiers, independent of Scroll Direction")
+    check(historyKeys.enumerated().allSatisfy { $0.element.type == ($0.offset % 2 == 0 ? .keyDown : .keyUp) },
+          "Every history key down has a matching key up")
+}
+historyKeys.removeAll()
+undoRedo.onUp()
+check(historyKeys.map(\.type) == [.keyDown, .keyUp] && historyKeys.allSatisfy { $0.flags == .maskCommand },
+      "Short release performs exactly one undo")
+check(historyPIDs.allSatisfy { $0 == 42 }, "History shortcuts target the foreground process")
+for count in [0, -1] {
+    undoRedo.onRotate(.Clockwise(count), 1)
+    undoRedo.onRotate(.CounterClockwise(count), -1)
+}
+historyForeground = nil
+undoRedo.onUp()
+undoRedo.onRotate(.CounterClockwise(3), 1)
+undoRedo.onRotate(.Clockwise(3), -1)
+check(historyKeys.count == 2, "Invalid counts and missing foreground application emit nothing")
+historyForeground = 42
+
+for rotation: Dial.Rotation in [.Clockwise(5), .CounterClockwise(5)] {
+    for changedOn: CGEventType in [.keyDown, .keyUp] {
+        for newPID: pid_t? in [84, nil] {
+            var foreground: pid_t? = 42
+            var events: [CGEvent] = []
+            var destinations: [pid_t] = []
+            let controller = UndoRedoController(targetProcess: { foreground }, post: { event, pid in
+                events.append(event)
+                destinations.append(pid)
+                if event.type == changedOn { foreground = newPID }
+            })
+            controller.onRotate(rotation, 1)
+            check(events.map(\.type) == [.keyDown, .keyUp] && destinations == [42, 42],
+                  "Focus loss or switching completes the original pair and stops remaining history steps")
+        }
+    }
+}
+do {
+    var lookups = 0
+    var events: [CGEvent] = []
+    let controller = UndoRedoController(targetProcess: {
+        lookups += 1
+        return lookups == 1 ? 42 : 84
+    }, post: { event, _ in events.append(event) })
+    controller.onRotate(.CounterClockwise(5), 1)
+    check(events.isEmpty, "A focus change before the first pair prevents the entire batch")
+    controller.onUp()
+    check(events.count == 2, "A new input can target the newly focused application")
+}
+
 // Route real controllers into recording sinks: holds and picker confirmation
 // must not produce any mode action, regardless of the current mode.
 var media: [Int32] = []
 let playback = PlaybackController(post: { key, _, count in media += Array(repeating: key, count: count) })
-for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, playback), (.zoom, zoom)] {
-    mouse.removeAll(); keys.removeAll(); media.removeAll()
+for (mode, controller) in [(Mode.scrolling, scroll as Controller), (.playback, playback), (.zoom, zoom), (.undoRedo, undoRedo)] {
+    mouse.removeAll(); keys.removeAll(); media.removeAll(); historyKeys.removeAll()
     let h = Harness()
     h.mode = mode
     h.input.onShortPress = { controller.onDown(); controller.onUp() }
     h.input.onCancelAction = { controller.onCancel() }
     h.input.onRotation = { controller.onRotate($0, $1) }
     h.report(.pressed)
-    check(mouse.isEmpty && keys.isEmpty && media.isEmpty, "No controller output on initial press")
+    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "No controller output on initial press")
     h.clock.advance(0.6)
     h.report(.released)
     h.report(.released, .Clockwise(3))
     h.report(.pressed)
     h.clock.advance(0.1)
     h.report(.released, .Clockwise(3))
-    check(mouse.isEmpty && keys.isEmpty && media.isEmpty, "Opening, browsing, and confirmation never emit mode actions")
+    check(mouse.isEmpty && keys.isEmpty && media.isEmpty && historyKeys.isEmpty, "Opening, browsing, and confirmation never emit mode actions")
     h.click()
     switch mode {
     case .scrolling: check(mouse.map(\.type) == [.leftMouseDown, .leftMouseUp], "Scroll emits one balanced click at short release")
     case .playback: check(media == [NX_KEYTYPE_PLAY], "Playback still plays/pauses on a short click")
     case .zoom: check(keys.count == 2, "Zoom still resets on a short click")
+    case .undoRedo: check(historyKeys.count == 2 && historyKeys.allSatisfy { $0.flags == .maskCommand },
+                         "Undo/Redo undoes once on short release")
     default: preconditionFailure("General controllers only")
+    }
+}
+for profile: AppProfile? in [nil, .lightroom] {
+    for duration in MenuPressDuration.allCases {
+        historyKeys.removeAll()
+        let h = Harness()
+        h.mode = .undoRedo
+        h.profile = profile
+        h.input.menuPressDuration = duration
+        h.input.onShortPress = { undoRedo.onDown(); undoRedo.onUp() }
+        h.input.onCancelAction = { undoRedo.onCancel() }
+        h.input.onRotation = { undoRedo.onRotate($0, $1) }
+        h.open()
+        h.input.highlight(.undoRedo)
+        h.report(.pressed)
+        h.clock.advance(0.1)
+        h.report(.released, .CounterClockwise(5))
+        check(h.commits == [.undoRedo] && historyKeys.isEmpty,
+              "Confirming Undo/Redo consumes click and rotation at every hold duration and in Lightroom")
+        h.open()
+        h.report(.pressed)
+        h.clock.advance(duration.seconds)
+        h.report(.released, .Clockwise(5))
+        check(h.input.picker == nil && historyKeys.isEmpty, "Second hold cancels without touching history")
+        h.report(.pressed)
+        h.input.cancel()
+        h.report(.released, .CounterClockwise(5))
+        check(historyKeys.isEmpty, "Cancelling an in-progress short press consumes its release and rotation")
+        h.click()
+        check(historyKeys.count == 2, "A fresh short click undoes once after cancellation")
     }
 }
 playback.onCancel()
@@ -617,22 +720,23 @@ playback.onUp()
 check(media == [NX_KEYTYPE_PLAY, NX_KEYTYPE_PLAY, NX_KEYTYPE_NEXT], "Playback double-click still advances the track")
 // Lightroom is a flat sequence; the parent group is not an extra stop.
 let lightroomModes = AppProfile.lightroom.availableModes
-check(lightroomModes == [.scrolling, .playback, .zoom, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
-      "Six choices have the requested clockwise order")
+check(Mode.generalModes == [.scrolling, .playback, .zoom, .undoRedo], "Four standard modes have the requested order")
+check(lightroomModes == [.scrolling, .playback, .zoom, .undoRedo, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
+      "Seven choices have the requested clockwise order")
 for start in lightroomModes {
     var picker = ModePickerState(selectedMode: start, profile: .lightroom)
-    for next in 1...6 {
+    for next in 1...lightroomModes.count {
         picker.move(by: 1)
-        check(picker.selectedMode == lightroomModes[(lightroomModes.firstIndex(of: start)! + next) % 6],
+        check(picker.selectedMode == lightroomModes[(lightroomModes.firstIndex(of: start)! + next) % lightroomModes.count],
               "Forward navigation crosses groups and wraps without a parent stop")
     }
-    picker.move(by: -6)
-    check(picker.selectedMode == start, "Reverse navigation wraps all six choices")
+    picker.move(by: -lightroomModes.count)
+    check(picker.selectedMode == start, "Reverse navigation wraps all contextual choices")
 }
-for count in [1, 2, 4, 6, 13] {
+for count in [1, 2, 4, 7, 15] {
     var picker = ModePickerState(selectedMode: .zoom, profile: .lightroom)
     picker.rotate(.Clockwise(count))
-    check(picker.selectedMode == lightroomModes[(2 + count) % 6], "Each tick advances one Lightroom choice")
+    check(picker.selectedMode == lightroomModes[(2 + count) % lightroomModes.count], "Each tick advances one Lightroom choice")
     picker.rotate(.CounterClockwise(count))
     check(picker.selectedMode == .zoom, "Multi-tick reversal crosses groups and wraps correctly")
 }
@@ -676,6 +780,20 @@ check(reopened.currentMode == .lightroomBrush && reopened.currentMode.title == "
       "An existing lightroomBrush preference reopens as Remove")
 relaunched.activate(bundleIdentifier: "com.adobe.Lightroom")
 check(relaunched.profile == nil && relaunched.currentMode == .playback, "Cloud Lightroom does not match the Classic profile")
+check(relaunched.select(.undoRedo) && defaults.string(forKey: "mode") == "undoRedo",
+      "Undo/Redo saves as a standard mode")
+let historyRelaunched = AppModeContext(defaults: defaults)
+check(historyRelaunched.currentMode == .undoRedo, "Standard Undo/Redo survives relaunch")
+historyRelaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(historyRelaunched.currentMode == .lightroomBrush, "Global history mode preserves Lightroom's existing selection")
+check(historyRelaunched.select(.undoRedo), "Undo/Redo can also be selected in Lightroom")
+historyRelaunched.activate(bundleIdentifier: nil)
+historyRelaunched.select(.zoom)
+let contextRelaunched = AppModeContext(defaults: defaults)
+contextRelaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
+check(contextRelaunched.currentMode == .undoRedo, "Lightroom's Undo/Redo survives a general mode change and relaunch")
+contextRelaunched.activate(bundleIdentifier: nil)
+check(contextRelaunched.currentMode == .zoom, "Leaving Lightroom restores the independently saved general mode")
 defaults.removePersistentDomain(forName: suite)
 
 let gate = InputContextGate()
@@ -716,6 +834,19 @@ do {
 
 let groupedLayout = RadialMenuLayout(profile: .lightroom)
 check(groupedLayout.diameter == 432, "Contextual bounds are 432 points")
+let generalLayout = RadialMenuLayout(profile: nil)
+check(generalLayout.segments.map(\.angle) == [90, 0, -90, -180]
+      && generalLayout.segments.allSatisfy { $0.sweep == 90 }, "Standard modes occupy four equal cardinal wedges")
+check(groupedLayout.segments.filter { $0.outerRadius == 150 }.count == 5
+      && groupedLayout.segments.filter { $0.outerRadius == 150 }.allSatisfy { $0.sweep == 72 },
+      "Four standard modes and Lightroom occupy five equal inner wedges")
+check(groupedLayout.segments.filter { $0.innerRadius == 150 }.map(\.sweep) == [24, 24, 24],
+      "Lightroom children equally divide the parent's outer arc")
+check((0..<360).allSatisfy { degrees in
+    let point = groupedLayout.point(angle: CGFloat(degrees) + 0.5, radius: 183)
+    return groupedLayout.outline.contains(point) == (groupedLayout.mode(at: point) != nil)
+        && groupedLayout.outline.compatibleCGPath.contains(point) == (groupedLayout.mode(at: point) != nil)
+}, "The entire outer arc's material mask agrees with selectable wedges")
 for segment in groupedLayout.segments {
     let point = groupedLayout.point(angle: segment.angle, radius: segment.iconRadius)
     check(groupedLayout.mode(at: point) == segment.mode, "Shared geometry identifies every child and excludes the parent")

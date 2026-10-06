@@ -1,3 +1,8 @@
+> Historical development record, retained for context. Paths, test counts, and
+> verification statements describe earlier checkouts and are not current release
+> evidence. See [the publication audit](../PUBLICATION_AUDIT.md) and
+> [contributor instructions](../../CONTRIBUTING.md) for current status.
+
 # Grouped Lightroom radial picker — design QA
 
 ## Extra window-shadow follow-up — October 5, 2026

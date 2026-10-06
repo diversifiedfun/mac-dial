@@ -4,14 +4,6 @@ import AppKit
 import Cocoa
 import SwiftUI
 
-extension NSString {
-    convenience init(wcharArray: UnsafeMutablePointer<wchar_t>) {
-        self.init(bytes: UnsafePointer(wcharArray),
-                        length: wcslen(wcharArray) * MemoryLayout<wchar_t>.stride,
-                        encoding: String.Encoding.utf32LittleEndian.rawValue)!
-    }
-}
-
 class Dial
 {
     enum ButtonState {
@@ -32,13 +24,14 @@ class Dial
     
     class Device
     {
-        private struct ReadBuffer {
+        private final class ReadBuffer {
             let pointer: UnsafeMutablePointer<UInt8>
             let size: Int
             init(size: Int) {
                 self.size = size
                 pointer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
             }
+            deinit { pointer.deallocate() }
         }
         
         // Identifiers for the Surface Dial
@@ -69,11 +62,7 @@ class Dial
                     return ""
                 }
                 
-                let buffer = UnsafeMutablePointer<wchar_t>.allocate(capacity: 255)
-                
-                hid_get_manufacturer_string(dev, buffer, 255)
-                
-                return NSString(wcharArray: buffer) as String
+                return DialHIDString.read { hid_get_manufacturer_string(dev, $0, $1) }
             }
         }
         
@@ -84,13 +73,10 @@ class Dial
                     return ""
                 }
                 
-                let buffer = UnsafeMutablePointer<wchar_t>.allocate(capacity: 255)
-                hid_get_serial_number_string(dev, buffer, 255)
-                    
-                return NSString(wcharArray: buffer) as String
+                return DialHIDString.read { hid_get_serial_number_string(dev, $0, $1) }
             }
         }
-        
+
         @discardableResult
         func connect() -> Bool {
             ioLock.lock(); defer { ioLock.unlock() }
@@ -157,7 +143,12 @@ class Dial
     }
     
     private var thread: Thread?
-    private var run: Bool = false
+    private let runLock = NSLock()
+    private var running = false
+    private var run: Bool {
+        get { runLock.lock(); defer { runLock.unlock() }; return running }
+        set { runLock.lock(); defer { runLock.unlock() }; running = newValue }
+    }
     let device = Device()
     private let configuration: DialConfigurationController
     private let hardwareQueue = DispatchQueue(label: "MacDial.hardware-feedback", qos: .userInteractive)
@@ -246,7 +237,7 @@ class Dial
         if let thread = self.thread {
             semaphore.signal()
             device.disconnect()
-            while !thread.isFinished { }
+            while !thread.isFinished { Thread.sleep(forTimeInterval: 0.001) }
             self.thread = nil;
         }
         
@@ -278,7 +269,7 @@ class Dial
                 print("Trying to open device...")
                 if device.connect() {
                     let serial = device.serialNumber
-                    print("Device \(serial) opened.")
+                    print("Surface Dial connected.")
                     if !configuration.didConnect() {
                         print("Could not configure Dial after connecting.")
                         device.disconnect()

@@ -1,3 +1,8 @@
+> Historical development record, retained for context. Paths, test counts, and
+> verification statements describe earlier checkouts and are not current release
+> evidence. See [the publication audit](../PUBLICATION_AUDIT.md) and
+> [contributor instructions](../../CONTRIBUTING.md) for current status.
+
 # Mac Dial customization — completed
 
 ## Status and tracking
@@ -16,7 +21,7 @@
 - [x] Complete integrated behavior, visual, and physical-device verification.
 - [x] Produce and verify the release build.
 
-Approved visual reference: [app-sidebar-v2.png](../design/dial-customization/app-sidebar-v2.png).
+Approved visual reference: app-sidebar-v2.png (historical local artifact; not distributed).
 Layout revision (2026-10-06): keep the application sidebar; place the linked preview below Add Application in the wider first column, the full-height slice list in the middle, and slice details on the right. Hide scrollbars when content fits. Remove redundant “Built-in slice” subtitles and the built-in explanatory footer.
 Geometry revision (2026-10-06): app subslices now use half the angular width of standard slices. This replaces the original equal-angle rule; ordering and the 18-action capacity are unchanged.
 The mockup establishes layout and visual direction. The geometry rules below are authoritative; generated wedge angles are illustrative.
@@ -207,21 +212,21 @@ Latest recorded results: **491 customization**, **21 permission**, **7,689 confi
 
 ### Verification logs
 
-- Baseline behavior: [`customization-baseline-tests-host.log`](../build/customization-baseline-tests-host.log).
-- Baseline native rendering: [`customization-baseline-render-host.log`](../build/customization-baseline-render-host.log).
-- Baseline build/signature: [`customization-baseline-build.log`](../build/customization-baseline-build.log).
-- Foundation configuration and behavior suites: [`customization-foundation-tests-host.log`](../build/customization-foundation-tests-host.log).
-- Foundation build/signature: [`customization-foundation-build.log`](../build/customization-foundation-build.log).
-- Runtime configuration and behavior: [`customization-runtime-tests.log`](../build/customization-runtime-tests.log).
-- Runtime native views: [`customization-runtime-render.log`](../build/customization-runtime-render.log).
-- Runtime build/signature: [`customization-runtime-build.log`](../build/customization-runtime-build.log).
-- Hardware-free preview build: [`customization-runtime-preview.log`](../build/customization-runtime-preview.log).
-- Custom-state Classic render exports: [`radial-render/images`](../build/radial-render/images/). Live glass was inspected separately because offscreen capture cannot reproduce its compositor effects reliably.
+- Baseline behavior: `customization-baseline-tests-host.log` (historical local artifact; not distributed).
+- Baseline native rendering: `customization-baseline-render-host.log` (historical local artifact; not distributed).
+- Baseline build/signature: `customization-baseline-build.log` (historical local artifact; not distributed).
+- Foundation configuration and behavior suites: `customization-foundation-tests-host.log` (historical local artifact; not distributed).
+- Foundation build/signature: `customization-foundation-build.log` (historical local artifact; not distributed).
+- Runtime configuration and behavior: `customization-runtime-tests.log` (historical local artifact; not distributed).
+- Runtime native views: `customization-runtime-render.log` (historical local artifact; not distributed).
+- Runtime build/signature: `customization-runtime-build.log` (historical local artifact; not distributed).
+- Hardware-free preview build: `customization-runtime-preview.log` (historical local artifact; not distributed).
+- Custom-state Classic render exports: `radial-render/images` (historical local artifact; not distributed). Live glass was inspected separately because offscreen capture cannot reproduce its compositor effects reliably.
 
-- Customization editing/native checks: [`customization-window-tests-host.log`](../build/customization-window-tests-host.log).
-- Full configuration and behavior suites: [`customization-window-behavior.log`](../build/customization-window-behavior.log).
-- Full native renderer checks: [`customization-window-render.log`](../build/customization-window-render.log).
-- Completed UI build/signature: [`customization-window-build.log`](../build/customization-window-build.log).
+- Customization editing/native checks: `customization-window-tests-host.log` (historical local artifact; not distributed).
+- Full configuration and behavior suites: `customization-window-behavior.log` (historical local artifact; not distributed).
+- Full native renderer checks: `customization-window-render.log` (historical local artifact; not distributed).
+- Completed UI build/signature: `customization-window-build.log` (historical local artifact; not distributed).
 
 Logs and build outputs are local artifacts. The cross-process preference test also needs host preference-service access; its temporary UUID-named suite is removed after verification. The customization preview also uses temporary UUID-named preferences, removed on normal exit. Physical-device checks and live custom-shortcut delivery were marked complete by the user at closeout. The coding agent did not replace the installed application.
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-preview_build="../build/radial-preview"
+preview_build="build/radial-preview"
 preview_app="$preview_build/Mac Dial Preview.app"
 mkdir -p "$preview_app/Contents/MacOS" "$preview_build/module-cache"
 xcrun swiftc -target arm64-apple-macos12.0 -module-cache-path "$preview_build/module-cache" \

@@ -657,12 +657,19 @@ class StatusBarController
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
         let credits = NSMutableAttributedString(
-            string: "Original author: Andreas Karlsson\n\n",
+            string: "Original author: Andreas Karlsson\nFork maintained and extended by David — Diversified Fun\n\n",
             attributes: [
                 .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
                 .foregroundColor: NSColor.labelColor,
                 .paragraphStyle: paragraphStyle
             ])
+        credits.append(NSAttributedString(
+            string: "Diversified Fun fork on GitHub\n",
+            attributes: [
+                .link: "https://github.com/diversifiedfun/mac-dial",
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .paragraphStyle: paragraphStyle
+            ]))
         credits.append(NSAttributedString(
             string: "View original project on GitHub",
             attributes: [

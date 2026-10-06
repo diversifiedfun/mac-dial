@@ -3,7 +3,9 @@
 import Foundation
 import AppKit
 
-// https://stackoverflow.com/a/55854051
+// HIDPostAuxKey is adapted from "the quantity", https://stackoverflow.com/a/55854051
+// (2019), CC BY-SA 4.0. Changes: modifier flags, Int32 keys and repeated pairs.
+// This function and its adaptations are under CC BY-SA 4.0; see THIRD_PARTY_NOTICES.md.
 func HIDPostAuxKey(key: Int32, modifiers: [NSEvent.ModifierFlags], _repeat: Int = 1) {
     func doKey(down: Bool) {
         

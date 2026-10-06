@@ -18,3 +18,17 @@ enum DialReportDecoder {
         return (button, rotation)
     }
 }
+
+// HIDAPI uses 32-bit wchar_t strings on macOS. Keep reads bounded and reject
+// failed or invalid strings; this is independent of hardware for regression tests.
+enum DialHIDString {
+    static func read(_ read: (UnsafeMutablePointer<wchar_t>, Int) -> Int32) -> String {
+        var buffer = [wchar_t](repeating: 0, count: 255)
+        let result = buffer.withUnsafeMutableBufferPointer { read($0.baseAddress!, $0.count) }
+        guard result == 0 else { return "" }
+        let count = buffer.firstIndex(of: 0) ?? buffer.count
+        return buffer.withUnsafeBytes { bytes in
+            String(bytes: bytes.prefix(count * MemoryLayout<wchar_t>.stride), encoding: .utf32LittleEndian) ?? ""
+        }
+    }
+}

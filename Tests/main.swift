@@ -43,6 +43,17 @@ for bytes: [UInt8] in [[], [1], [1, 0], [1, 0, 1], [2, 0, 1, 0]] {
     check(DialReportDecoder.decode(bytes) == nil, "Truncated and unrelated HID reports are rejected safely")
 }
 
+// Real buffer decoder, fake HID reads: no device access.
+check(DialHIDString.read { _, _ in -1 }.isEmpty, "Failed HID string reads are empty")
+check(DialHIDString.read { _, _ in 0 }.isEmpty, "An untouched HID string is initialized")
+check(DialHIDString.read { buffer, count in
+    for i in 0..<count { buffer[i] = 65 }; return 0
+} == String(repeating: "A", count: 255), "Unterminated HID strings stay within the buffer")
+check(DialHIDString.read { buffer, _ in buffer[0] = 0x110000; return 0 }.isEmpty,
+      "Invalid Unicode from a device is rejected")
+check(DialHIDString.read { buffer, _ in buffer[0] = 0x1F600; return 0 } == "😀",
+      "HID strings preserve valid non-BMP characters")
+
 final class Clock {
     var time: TimeInterval = 0
     var pending: [(TimeInterval, DispatchWorkItem)] = []
@@ -723,7 +734,7 @@ check(mouse.last!.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == -24,
 
 // Check actual keyboard events, including both edges and no inherited modifiers.
 var keys: [CGEvent] = []
-let zoom = ZoomController(post: { keys.append($0) })
+let zoom = ZoomController(targetProcess: { 42 }, post: { event, _ in keys.append(event) })
 zoom.onDown()
 zoom.onCancel()
 check(keys.isEmpty, "Long press in Zoom must not reset zoom")
@@ -740,6 +751,26 @@ check(keys.enumerated().allSatisfy { $0.element.type == ($0.offset % 2 == 0 ? .k
 zoom.onRotate(.Clockwise(0), 1)
 zoom.onRotate(.CounterClockwise(-1), -1)
 check(keys.count == 8, "Empty rotations must not generate keys")
+
+var zoomForeground: pid_t? = 42
+var zoomTargets: [pid_t] = []
+let switchingZoom = ZoomController(targetProcess: { zoomForeground }, post: { _, pid in
+    zoomTargets.append(pid)
+    zoomForeground = 99
+})
+switchingZoom.onRotate(.Clockwise(3), 1)
+check(zoomTargets == [42, 42], "Zoom finishes its pair in the original app and stops after a focus change")
+zoomForeground = nil
+switchingZoom.onUp()
+check(zoomTargets.count == 2, "Zoom sends nothing without a foreground process")
+var cancellingZoom: ZoomController!
+var cancelledZoomKeys = 0
+cancellingZoom = ZoomController(targetProcess: { 42 }, post: { _, _ in
+    cancelledZoomKeys += 1
+    cancellingZoom.onCancel()
+})
+cancellingZoom.onRotate(.Clockwise(3), 1)
+check(cancelledZoomKeys == 2, "Zoom finishes its pair but stops the batch after cancellation")
 
 var historyKeys: [CGEvent] = []
 var historyPIDs: [pid_t] = []

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 bash Tests/configuration.sh
-test_build="../build/controller-tests"
+test_build="build/controller-tests"
 mkdir -p "$test_build/module-cache"
 xcrun swiftc -module-cache-path "$test_build/module-cache" \
     MacDial/Controller.swift MacDial/DialButtonHandler.swift MacDial/Mode.swift MacDial/SliceConfiguration.swift MacDial/SliceConfigurationStore.swift MacDial/CustomSliceController.swift MacDial/DialReportDecoder.swift \

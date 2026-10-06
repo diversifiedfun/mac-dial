@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-permission_build="../build/permission-preview"
+permission_build="build/permission-preview"
 permission_app="$permission_build/Mac Dial Permission Preview.app"
 mkdir -p "$permission_app/Contents/MacOS" "$permission_build/module-cache"
 xcrun swiftc -target arm64-apple-macos12.0 -module-cache-path "$permission_build/module-cache" \

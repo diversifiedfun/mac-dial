@@ -5,6 +5,14 @@ reproduction steps and relevant verification with pull requests to this fork.
 Do not include generated apps, build output, personal Xcode state, signing material,
 application preferences, or logs containing private information.
 
+## Development tooling
+
+Development used OpenAI Codex with GPT-6 Astra at High and Extra High reasoning
+effort. Codex assisted with implementation, debugging, automated verification,
+and documentation under David's product direction and hands-on hardware testing.
+These settings document the development workflow; they are not required to build
+or contribute to the project.
+
 ## Build
 
 Clone recursively and run `bash build-mac-dial.sh` from the repository root.

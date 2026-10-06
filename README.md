@@ -139,6 +139,14 @@ further manual verification for this publication.
   and older macOS versions require further manual verification for this publication.
   Automated tests do not certify those combinations.
 
+## Development acknowledgment
+
+This fork was developed by David — Diversified Fun, with OpenAI Codex assisting
+in implementation, debugging, testing, and documentation. David led product
+direction, interaction design, and hands-on hardware testing. See the
+[development tooling notes](CONTRIBUTING.md#development-tooling) for the model
+and reasoning settings used.
+
 ## Privacy, contributing, and license
 
 The reviewed production code contains no app-managed analytics, update checks, or

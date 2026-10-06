@@ -64,8 +64,8 @@ macOS 12. These are distinct: older runtimes and Intel are not verified here.
 | Permission logic and native recovery guidance | 21 checks passed |
 | Native customization | 491 checks passed |
 | Native presentation and render export | 1,848 checks passed |
-| Fresh recursive clone and build | Pending final publication check |
-| Documentation links and current-tree secret scan | Pending final publication check |
+| Fresh local clone, online submodule initialization, Release build and signature | Passed; tracked tree and submodule stayed clean |
+| Local documentation links and current-tree Gitleaks scan | Passed; no broken local links or detected secrets |
 
 Initial sandboxed native test attempts could not access preference/window services;
 the suites passed when rerun with host service access. The build reports existing
@@ -81,3 +81,7 @@ remain unverified for this publication. Use the [manual checklist](../CONTRIBUTI
 These limitations are disclosed for source publication; they must not be represented
 as passed tests or a stable end-user release. The original bundle identifier and
 settings format are unchanged, so upstream and this fork share a preferences domain.
+
+About credits and both destination URLs were checked in the compiled source.
+A separate Mac Dial development copy was already running; the publication build
+was not launched alongside it, and its live About window was not visually verified.

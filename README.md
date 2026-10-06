@@ -153,3 +153,7 @@ reproducible bugs; remove private information from logs and screenshots.
 The main project is under the [MIT license](LICENSE), preserving Andreas Karlsson's
 notice. The inherited media-key helper has a **CC BY-SA 4.0** exception; HIDAPI and
 other references have their own notices. See [Third-party notices](THIRD_PARTY_NOTICES.md).
+
+Mac Dial is an independent project and is not affiliated with, sponsored by, or
+endorsed by Microsoft. Microsoft and Surface are trademarks of the Microsoft
+group of companies.

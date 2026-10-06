@@ -44,34 +44,56 @@ enum RadialMenuStartPosition: String, CaseIterable {
 }
 
 struct ModePickerState {
-    private(set) var selectedMode: Mode
-    let profile: AppProfile?
-    let availableModes: [Mode]
+    private(set) var selectedSliceID: SliceID?
+    let dial: ResolvedDial
+    let application: ApplicationConfiguration?
     var isArmed = false
+
+    var selectedSlice: SliceDefinition? { dial.clockwiseSlices.first { $0.id == selectedSliceID } }
+    // Built-in compatibility for the existing test/preview callers. Runtime
+    // dispatch must use selectedSliceID; an empty or custom dial isn't Scroll.
+    var selectedMode: Mode { selectedSlice?.builtInMode ?? .scrolling }
+    var profile: AppProfile? { AppProfile.matching(application?.bundleIdentifier) }
+    var availableModes: [Mode] { dial.clockwiseSlices.compactMap(\.builtInMode) }
+
+    init(dial: ResolvedDial, application: ApplicationConfiguration? = nil,
+         selectedSliceID: SliceID?, startPosition: RadialMenuStartPosition = .lastSelected) {
+        self.dial = dial
+        self.application = application
+        if startPosition == .lastSelected, let id = selectedSliceID, dial.contains(id) {
+            self.selectedSliceID = id
+        } else {
+            self.selectedSliceID = dial.clockwiseSlices.first?.id
+        }
+    }
 
     init(selectedMode: Mode, profile: AppProfile? = nil,
          startPosition: RadialMenuStartPosition = .lastSelected) {
-        self.profile = profile
-        availableModes = profile?.availableModes ?? Mode.generalModes
-        switch startPosition {
-        case .lastSelected:
-            self.selectedMode = availableModes.contains(selectedMode) ? selectedMode : .scrolling
-        case .firstItem:
-            self.selectedMode = availableModes.first ?? .scrolling
-        }
+        let configuration = SliceConfiguration.builtInDefaults
+        self.init(dial: configuration.resolved(for: profile?.bundleIdentifier),
+                  application: configuration.applications.first { $0.bundleIdentifier == profile?.bundleIdentifier },
+                  selectedSliceID: .builtIn(selectedMode), startPosition: startPosition)
     }
 
     @discardableResult
     mutating func select(_ mode: Mode) -> Bool {
-        guard availableModes.contains(mode) else { return false }
-        let changed = selectedMode != mode
-        selectedMode = mode
+        selectSlice(.builtIn(mode))
+    }
+
+    @discardableResult
+    mutating func selectSlice(_ id: SliceID) -> Bool {
+        guard dial.contains(id) else { return false }
+        let changed = selectedSliceID != id
+        selectedSliceID = id
         return changed
     }
 
     @discardableResult
     mutating func move(by steps: Int) -> Bool {
-        select(selectedMode.advanced(by: steps, in: availableModes))
+        let ids = dial.clockwiseSlices.map(\.id)
+        guard !ids.isEmpty else { return false }
+        let index = ids.firstIndex { $0 == selectedSliceID } ?? 0
+        return selectSlice(ids[(index + steps % ids.count + ids.count) % ids.count])
     }
 
     @discardableResult

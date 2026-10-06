@@ -198,6 +198,8 @@ class Dial
         return cachedSerialNumber
     }
 
+    func retryConnection() { semaphore.signal() }
+
     private func setConnectedSerialNumber(_ serial: String?) {
         connectionLock.lock(); defer { connectionLock.unlock() }
         cachedSerialNumber = serial

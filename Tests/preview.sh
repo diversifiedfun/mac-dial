@@ -5,7 +5,7 @@ preview_build="../build/radial-preview"
 preview_app="$preview_build/Mac Dial Preview.app"
 mkdir -p "$preview_app/Contents/MacOS" "$preview_build/module-cache"
 xcrun swiftc -target arm64-apple-macos12.0 -module-cache-path "$preview_build/module-cache" \
-    MacDial/Mode.swift MacDial/DialButtonHandler.swift MacDial/ModePickerState.swift \
+    MacDial/Mode.swift MacDial/SliceConfiguration.swift MacDial/DialButtonHandler.swift MacDial/ModePickerState.swift \
     MacDial/DialInputCoordinator.swift MacDial/RadialMenuLayout.swift MacDial/RadialMenuView.swift \
     MacDial/RadialMenuController.swift Tests/Preview/main.swift \
     -o "$preview_app/Contents/MacOS/MacDialPreview"

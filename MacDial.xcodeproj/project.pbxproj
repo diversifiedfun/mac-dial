@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F02200000000000000000002 /* DialCustomizationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02200000000000000000001 /* DialCustomizationWindow.swift */; };
+		F02300000000000000000002 /* DialPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02300000000000000000001 /* DialPermissions.swift */; };
+		F02100000000000000000002 /* CustomizationControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000001 /* CustomizationControls.swift */; };
+		F02000000000000000000002 /* DialCustomizationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000001 /* DialCustomizationSession.swift */; };
+		F01900000000000000000002 /* CustomSliceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01900000000000000000001 /* CustomSliceController.swift */; };
+		F01700000000000000000002 /* SliceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01700000000000000000001 /* SliceConfiguration.swift */; };
+		F01800000000000000000002 /* SliceConfigurationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01800000000000000000001 /* SliceConfigurationStore.swift */; };
 		F01400000000000000000002 /* DialReportDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01400000000000000000001 /* DialReportDecoder.swift */; };
 		F01200000000000000000002 /* UndoRedoController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01200000000000000000001 /* UndoRedoController.swift */; };
 		F01500000000000000000002 /* BrightnessController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01500000000000000000001 /* BrightnessController.swift */; };
@@ -38,6 +45,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F02200000000000000000001 /* DialCustomizationWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialCustomizationWindow.swift; sourceTree = "<group>"; };
+		F02300000000000000000001 /* DialPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialPermissions.swift; sourceTree = "<group>"; };
+		F02100000000000000000001 /* CustomizationControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomizationControls.swift; sourceTree = "<group>"; };
+		F02000000000000000000001 /* DialCustomizationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialCustomizationSession.swift; sourceTree = "<group>"; };
+		F01900000000000000000001 /* CustomSliceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomSliceController.swift; sourceTree = "<group>"; };
+		F01700000000000000000001 /* SliceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceConfiguration.swift; sourceTree = "<group>"; };
+		F01800000000000000000001 /* SliceConfigurationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliceConfigurationStore.swift; sourceTree = "<group>"; };
 		F01400000000000000000001 /* DialReportDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialReportDecoder.swift; sourceTree = "<group>"; };
 		F01200000000000000000001 /* UndoRedoController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoRedoController.swift; sourceTree = "<group>"; };
 		F01500000000000000000001 /* BrightnessController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrightnessController.swift; sourceTree = "<group>"; };
@@ -123,6 +137,13 @@
 				F00500000000000000000001 /* DialInputCoordinator.swift */,
 				F00400000000000000000001 /* ModePickerState.swift */,
 				F00300000000000000000001 /* Mode.swift */,
+				F01700000000000000000001 /* SliceConfiguration.swift */,
+				F01800000000000000000001 /* SliceConfigurationStore.swift */,
+				F02000000000000000000001 /* DialCustomizationSession.swift */,
+				F02100000000000000000001 /* CustomizationControls.swift */,
+				F02200000000000000000001 /* DialCustomizationWindow.swift */,
+				F02300000000000000000001 /* DialPermissions.swift */,
+				F01900000000000000000001 /* CustomSliceController.swift */,
 				F01100000000000000000001 /* DialConfiguration.swift */,
 				C89D24282703BA5E00B1A458 /* Controller.swift */,
 				C882FA1D26F1430D00595EE1 /* Assets.xcassets */,
@@ -242,6 +263,13 @@
 				F00500000000000000000002 /* DialInputCoordinator.swift in Sources */,
 				F00400000000000000000002 /* ModePickerState.swift in Sources */,
 				F00300000000000000000002 /* Mode.swift in Sources */,
+				F01700000000000000000002 /* SliceConfiguration.swift in Sources */,
+				F01800000000000000000002 /* SliceConfigurationStore.swift in Sources */,
+				F02000000000000000000002 /* DialCustomizationSession.swift in Sources */,
+				F02100000000000000000002 /* CustomizationControls.swift in Sources */,
+				F02200000000000000000002 /* DialCustomizationWindow.swift in Sources */,
+				F02300000000000000000002 /* DialPermissions.swift in Sources */,
+				F01900000000000000000002 /* CustomSliceController.swift in Sources */,
 				F01100000000000000000002 /* DialConfiguration.swift in Sources */,
 				C89D24292703BA5E00B1A458 /* Controller.swift in Sources */,
 				C89D242D2704870C00B1A458 /* PlaybackController.swift in Sources */,

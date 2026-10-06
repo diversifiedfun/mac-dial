@@ -72,6 +72,9 @@ final class RadialMenuController: NSObject, NSWindowDelegate {
         isShowing = true
         panel.setFrame(view.menuLayout.frame(around: pointer, in: screen.visibleFrame,
                                              padding: RadialMenuLayout.effectPadding), display: true)
+        // Small displays scale the entire view in wheel coordinates, including
+        // icon controls and hit testing, rather than cropping a dense dial.
+        view.fitPresentation(to: panel.contentView!.frame.size)
         let animate = !reduceMotion()
         panel.ignoresMouseEvents = false
         panel.alphaValue = animate ? 0 : 1

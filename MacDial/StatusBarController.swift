@@ -66,13 +66,7 @@ extension NSMenu {
         self.addItem(items.title)
         self.addItem(items.connectionStatus)
         self.addItem(items.separator)
-        for item in items.modeItems { self.addItem(item) }
-        items.lightroom.submenu = NSMenu()
-        for item in items.lightroomModes { items.lightroom.submenu?.addItem(item) }
-        self.addItem(items.lightroom)
-        items.editwall.submenu = NSMenu()
-        for item in items.editwallModes { items.editwall.submenu?.addItem(item) }
-        self.addItem(items.editwall)
+        self.addItem(items.customize)
         self.addItem(items.separator2)
         
         items.wheelSensitivity.submenu = NSMenu.init()
@@ -128,7 +122,18 @@ class StatusBarController
     private let menu: NSMenu
     private let dial: Dial
     private let menuItems = MenuItems()
-    private let modeContext = AppModeContext()
+    private let modeContext: AppModeContext
+    private let permissions = DialPermissions()
+    private var permissionWindow: DialPermissionWindow?
+    private let noActionController = NoActionController()
+    private var customControllers: [SliceID: CustomSliceController] = [:]
+    private var dynamicMenuItems: [NSMenuItem] = []
+    private var observedConfiguration: SliceConfiguration?
+    // The customization window will own this flag while it is active.
+    var customizationIsActive = false {
+        didSet { if customizationIsActive { cancelPendingInput() } }
+    }
+    var configurationStore: SliceConfigurationStore { modeContext.store }
     private let inputGate = InputContextGate()
     private var foregroundPID: pid_t?
     private var foregroundBundleID: String?
@@ -136,6 +141,14 @@ class StatusBarController
         currentMode: { [weak self] in self?.currentMode ?? .scrolling },
         currentProfile: { [weak self] in self?.modeContext.profile })
     private let radialMenu = RadialMenuController()
+    private lazy var customizationWindow: DialCustomizationWindow = {
+        let window = DialCustomizationWindow(store: configurationStore)
+        window.onVisibilityChanged = { [weak self] active in
+            self?.cancelPendingInput()
+            self?.customizationIsActive = active
+        }
+        return window
+    }()
     private var connectionTimer: Timer?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     
@@ -191,13 +204,31 @@ class StatusBarController
             MenuOptionItem<HapticsMode>.init(title: "Enabled", option: .enabled)
         ]
         let separator3 = NSMenuItem.separator()
+        let customize = NSMenuItem(title: "Customize Dial…")
         let quit = NSMenuItem.init(title: "Quit")
     }
     
     var currentMode: Mode { modeContext.currentMode }
 
     var currentController: Controller {
-        menuItems.allModeItems.first { $0.option == currentMode }!.controller
+        guard permissions.isGranted, !customizationIsActive, let slice = modeContext.currentSlice else { return noActionController }
+        if let mode = slice.builtInMode {
+            return menuItems.allModeItems.first { $0.option == mode }?.controller ?? noActionController
+        }
+        if let cached = customControllers[slice.id] { return cached }
+        guard case .custom(let value) = slice.content else { return noActionController }
+        let appID = modeContext.resolvedDial.applicationSlices.contains { $0.id == slice.id }
+            ? modeContext.application?.bundleIdentifier : nil
+        let controller = CustomSliceController(gestures: value.gestures, targetProcess: { [weak self] in
+            guard let self = self, self.permissions.refresh(), !self.customizationIsActive,
+                  self.modeContext.currentSlice?.id == slice.id,
+                  let app = NSWorkspace.shared.frontmostApplication,
+                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+                  appID == nil || app.bundleIdentifier == appID else { return nil }
+            return app.processIdentifier
+        })
+        customControllers[slice.id] = controller
+        return controller
     }
 
     private var scrollController: ScrollController { menuItems.scrollMode.controller as! ScrollController }
@@ -303,7 +334,8 @@ class StatusBarController
         }
     }
     
-    init( _ dial: Dial) {
+    init( _ dial: Dial) throws {
+        self.modeContext = try AppModeContext()
         self.dial = dial
         self.menu = NSMenu.init()
         
@@ -314,7 +346,21 @@ class StatusBarController
         foregroundPID = app?.processIdentifier
         foregroundBundleID = app?.bundleIdentifier
         modeContext.activate(bundleIdentifier: foregroundBundleID)
+        observedConfiguration = modeContext.store.configuration
+        modeContext.store.onChange = { [weak self] configuration in
+            guard let self = self else { return }
+            if self.observedConfiguration?.hasSameContent(as: configuration) != true {
+                self.cancelPendingInput()
+                self.customControllers.removeAll()
+            }
+            self.observedConfiguration = configuration
+            self.refreshModeUI()
+        }
+        input.currentPicker = { [weak self] in
+            self?.modeContext.pickerState ?? ModePickerState(selectedMode: .scrolling)
+        }
         menu.minimumWidth = 260
+        menu.autoenablesItems = false
         
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.boldSystemFont(ofSize: 0)
@@ -325,6 +371,7 @@ class StatusBarController
         menuItems.title.action = #selector(showAbout(sender:))
         
         menuItems.connectionStatus.target = self
+        menuItems.connectionStatus.action = #selector(showPermissionHelp)
         menuItems.connectionStatus.isEnabled = false
         
         for item in menuItems.allModeItems {
@@ -388,6 +435,8 @@ class StatusBarController
         
         menuItems.quit.target = self;
         menuItems.quit.action = #selector(quitApp(sender:))
+        menuItems.customize.target = self
+        menuItems.customize.action = #selector(showCustomization)
         
         menu.addMenuItems(menuItems)
         
@@ -412,7 +461,7 @@ class StatusBarController
         }
         scrollController.canScroll = { [weak self] in
             guard let self = self, !self.refreshForegroundApplication() else { return false }
-            return self.currentMode == .scrolling && self.input.picker == nil
+            return self.permissions.refresh() && !self.customizationIsActive && self.modeContext.currentSlice?.builtInMode == .scrolling && self.input.picker == nil
         }
         for option in menuItems.scrollStyleOptions {
             option.target = self
@@ -432,7 +481,7 @@ class StatusBarController
             self.currentController.onRotate(rotation, direction)
         }
         input.onCancelAction = { [weak self] in self?.currentController.onCancel() }
-        input.onCommit = { [weak self] mode in self?.applyMode(mode) ?? false }
+        input.onCommitSlice = { [weak self] id in self?.applySlice(id) ?? false }
         input.onConfirmation = { [weak self] state in self?.radialMenu.confirm(state) }
         input.onFeedback = { [weak self] in self?.dial.feedback() }
         input.onMenuNavigationChanged = { [weak self] active in
@@ -441,17 +490,17 @@ class StatusBarController
         input.onPickerChanged = { [weak self] state in
             guard let self = self else { return }
             if let state = state {
-                guard !self.refreshForegroundApplication() else { return }
+                guard self.permissions.refresh(), !self.refreshForegroundApplication() else { return }
                 self.radialMenu.show(state)
             }
             else { self.radialMenu.dismiss() }
         }
-        radialMenu.view.onHighlight = { [weak self] mode in self?.input.highlight(mode) }
-        radialMenu.view.onPressHighlight = { [weak self] mode in self?.input.highlight(mode, feedback: false) }
+        radialMenu.view.onHighlightSlice = { [weak self] id in self?.input.highlightSlice(id) }
+        radialMenu.view.onPressHighlightSlice = { [weak self] id in self?.input.highlightSlice(id, feedback: false) }
         radialMenu.view.onMove = { [weak self] steps in self?.input.moveSelection(by: steps) }
         radialMenu.view.onConfirm = { [weak self] in self?.input.confirmSelection() }
-        radialMenu.view.onSelect = { [weak self] mode in
-            self?.input.confirmSelection(mode)
+        radialMenu.view.onSelectSlice = { [weak self] id in
+            self?.input.confirmSlice(id)
         }
         radialMenu.view.onCancel = { [weak self] in self?.cancelPendingInput() }
 
@@ -461,7 +510,7 @@ class StatusBarController
             DispatchQueue.main.async {
                 guard let self = self, case let .dial(button, rotation) = report else { return }
                 let changedApp = self.refreshForegroundApplication()
-                guard !changedApp, gate.accepts(token, timestamp: timestamp) else {
+                guard self.permissions.refresh(), !self.customizationIsActive, !changedApp, gate.accepts(token, timestamp: timestamp) else {
                     self.input.discard(button: button)
                     return
                 }
@@ -482,6 +531,19 @@ class StatusBarController
             observe(workspace, name)
         }
         observe(NotificationCenter.default, NSApplication.didChangeScreenParametersNotification)
+        observe(NotificationCenter.default, NSApplication.didBecomeActiveNotification)
+        permissions.onChange = { [weak self] granted in
+            guard let self = self else { return }
+            self.cancelPendingInput()
+            self.refreshModeUI()
+            if granted {
+                self.permissionWindow?.close()
+                self.dial.retryConnection()
+            } else {
+                self.showPermissionHelp()
+            }
+        }
+        updateConnectionStatus()
     }
 
     deinit {
@@ -494,15 +556,18 @@ class StatusBarController
             guard let self = self else { return }
             self.cancelPendingInput()
             self.refreshForegroundApplication()
+            self.updateConnectionStatus()
         }
         observers.append((center, observer))
     }
 
     private func updateConnectionStatus() {
-        if !AXIsProcessTrusted() {
-            menuItems.connectionStatus.title = "Accessibility permission required"
+        if !permissions.refresh() {
+            menuItems.connectionStatus.title = "Dial paused — Fix Permissions…"
+            menuItems.connectionStatus.isEnabled = true
             return
         }
+        menuItems.connectionStatus.isEnabled = false
         if let serialNumber = dial.connectedSerialNumber {
             menuItems.connectionStatus.title = "Surface Dial '\(serialNumber)' connected"
         }
@@ -512,11 +577,37 @@ class StatusBarController
     }
     
     private func refreshModeUI() {
-        for item in menuItems.allModeItems { item.selected = item.option == currentMode }
-        menuItems.lightroom.isHidden = modeContext.profile != .lightroom
-        menuItems.editwall.isHidden = modeContext.profile != .editwall
-        menuItems.editwall.state = currentMode == .editwallSequence ? .on : .off
-        menuItems.lightroom.state = currentMode.isLightroom ? .on : .off
+        dynamicMenuItems.forEach { menu.removeItem($0) }
+        dynamicMenuItems.removeAll()
+        let dial = modeContext.resolvedDial
+        let selected = modeContext.currentSlice?.id
+        func item(for slice: SliceDefinition) -> NSMenuItem {
+            let item = NSMenuItem(title: slice.title, action: #selector(setSlice(sender:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = permissions.isGranted
+            item.representedObject = slice.id
+            item.state = slice.id == selected ? .on : .off
+            item.toolTip = slice.usageHelp
+            return item
+        }
+        for slice in dial.standardSlices { dynamicMenuItems.append(item(for: slice)) }
+        if !dial.applicationSlices.isEmpty, let app = modeContext.application {
+            let parent = NSMenuItem(title: app.displayName)
+            parent.submenu = NSMenu()
+            parent.submenu?.autoenablesItems = false
+            parent.isEnabled = permissions.isGranted
+            for slice in dial.applicationSlices { parent.submenu?.addItem(item(for: slice)) }
+            parent.state = dial.applicationSlices.contains { $0.id == selected } ? .on : .off
+            dynamicMenuItems.append(parent)
+        }
+        if dial.actionCount == 0 {
+            let empty = NSMenuItem(title: "No enabled slices")
+            empty.isEnabled = false
+            dynamicMenuItems.append(empty)
+        }
+        if let insertionIndex = menu.items.firstIndex(of: menuItems.customize) {
+            for (offset, item) in dynamicMenuItems.enumerated() { menu.insertItem(item, at: insertionIndex + offset) }
+        }
         updateIcon()
     }
 
@@ -536,19 +627,29 @@ class StatusBarController
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
-        let mode = currentMode
-        switch mode {
-        case .scrolling: button.image = #imageLiteral(resourceName: "icon-scroll")
-        case .playback: button.image = #imageLiteral(resourceName: "icon-playback")
-        default: button.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: mode.title)
+        if !permissions.isGranted {
+            button.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Mac Dial permission required")
+            button.image?.isTemplate = true
+            button.image?.size = NSSize(width: 18, height: 18)
+            button.toolTip = "Mac Dial is paused. Open the menu and choose Fix Permissions."
+            button.setAccessibilityHelp(button.toolTip)
+            return
+        }
+        let slice = modeContext.currentSlice
+        switch slice?.builtInMode {
+        case .scrolling?: button.image = #imageLiteral(resourceName: "icon-scroll")
+        case .playback?: button.image = #imageLiteral(resourceName: "icon-playback")
+        default:
+            button.image = NSImage(systemSymbolName: slice?.symbolName ?? "circle", accessibilityDescription: slice?.title)
+                ?? NSImage(systemSymbolName: "star", accessibilityDescription: slice?.title)
         }
         button.image?.isTemplate = true
         button.image?.size = NSSize(width: 18, height: 18)
-        let context = modeContext.profile.map { "\($0.title) — " } ?? ""
-        button.toolTip = "Mac Dial — \(context)\(mode.title). Hold, release, turn, then click to choose a mode."
-            + (mode.usageHelp.map { " " + $0 } ?? "")
-            + (mode == .scrolling ? " Scroll style: \(scrollController.style.title)." : "")
-        button.setAccessibilityHelp(mode == .scrolling ? button.toolTip : mode.usageHelp)
+        let context = modeContext.application.map { "\($0.displayName) — " } ?? ""
+        button.toolTip = "Mac Dial — \(context)\(slice?.title ?? "No enabled slices"). Hold, release, turn, then click to choose."
+            + (slice?.usageHelp.map { " " + $0 } ?? "")
+            + (slice?.builtInMode == .scrolling ? " Scroll style: \(scrollController.style.title)." : "")
+        button.setAccessibilityHelp(button.toolTip)
         button.imagePosition = .imageLeft
     }
 
@@ -575,6 +676,18 @@ class StatusBarController
             .credits: credits
         ])
     }
+
+    @objc private func showPermissionHelp() {
+        if permissionWindow == nil {
+            permissionWindow = DialPermissionWindow(check: { [weak self] in
+                self?.updateConnectionStatus()
+                return self?.permissions.isGranted == true
+            })
+        }
+        permissionWindow?.present()
+    }
+
+    @objc private func showCustomization() { customizationWindow.present() }
     
     @objc func setMode(sender: AnyObject) {
         let item = sender as! ControllerOptionItem
@@ -582,7 +695,17 @@ class StatusBarController
         applyMode(item.option)
     }
 
+    @objc private func setSlice(sender: NSMenuItem) {
+        guard let id = sender.representedObject as? SliceID else { return }
+        cancelPendingInput()
+        _ = applySlice(id)
+    }
+
     func cancelPendingInput() {
+        // The store may already contain a new selection/configuration. Cancel
+        // every old controller before looking up the next one.
+        menuItems.allModeItems.forEach { $0.controller.onCancel() }
+        customControllers.values.forEach { $0.onCancel() }
         inputGate.invalidate()
         dial.cancelFeedback()
         input.cancel()
@@ -591,11 +714,15 @@ class StatusBarController
 
     @discardableResult
     private func applyMode(_ mode: Mode) -> Bool {
-        guard !refreshForegroundApplication(), modeContext.select(mode) else { return false }
-        refreshModeUI()
-        return true
+        applySlice(.builtIn(mode))
     }
     
+    @discardableResult
+    private func applySlice(_ id: SliceID) -> Bool {
+        guard permissions.refresh(), !customizationIsActive, !refreshForegroundApplication(), modeContext.selectSlice(id) else { return false }
+        return true
+    }
+
     @objc func setSensitivity(sender: AnyObject) {
         let item = sender as! NSMenuItem
         wheelSensitivity = (item.representedObject as! WheelSensitivity)

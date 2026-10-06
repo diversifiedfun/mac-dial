@@ -91,10 +91,8 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
             let frame = button.convert(button.bounds, to: view)
             return controls.dropFirst(index + 1).allSatisfy { !frame.intersects($0.convert($0.bounds, to: view)) }
         }, "Native pointer targets do not overlap in either ring")
-        if mode == .undoRedo {
-            check(visibleLabels.map(\.stringValue) == ["Undo/Redo", "Turn to choose", "Press to select"],
-                  "Undo/Redo's center explains picker navigation rather than triggering history actions")
-        }
+        check(visibleLabels.map { $0.stringValue.replacingOccurrences(of: "\n", with: " ") } == [mode.title],
+              "The center shows only the mode heading")
         if let profile = profile {
             let group = view.subviews.first { $0.accessibilityRole() == .group && $0.accessibilityLabel() == "\(profile.title) modes" }
             check(group != nil && buttons(in: group!).count == profile.modes.count, "App-specific children have an accessible group")
@@ -210,7 +208,7 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
             check(controls.allSatisfy { $0.alphaValue == (Mode.allCases[$0.tag] == mode ? 1 : 0) },
                   "Only the confirmed icon remains visible in either ring")
             let labels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
-            check(labels.map(\.stringValue) == [mode.title, "Selected"], "Confirmation replaces instructions with explicit status")
+            check(labels.map { $0.stringValue.replacingOccurrences(of: "\n", with: " ") } == [mode.title, "Selected"], "Confirmation replaces instructions with explicit status")
             check(labels.allSatisfy { $0.attributedStringValue.size().width <= $0.bounds.width },
                   "Confirmation text fits for every mode")
             let prefix = profile.map { $0.title.lowercased() + "-" } ?? ""
@@ -400,4 +398,54 @@ for reducedMotion in [false, true] {
     input.handle(button: .released, rotation: .Clockwise(3), scrollDirection: 1)
     check(input.picker == nil && activeMode == .zoom, "Holding and releasing cannot cancel or reopen a committed menu")
 }
-print("Passed \(checks) native view checks; rendered general, Lightroom and Editwall states to \(destination.path)")
+// Dense, empty, app-only and single-action states use the production renderer.
+// Compositor-only glass cannot be accurately exported through bitmap caching.
+// These geometry reference images use Classic; native glass is checked above.
+view.preferredAppearance = .classic
+for (name, standardCount, appCount) in [("empty", 0, 0), ("single", 1, 0), ("app-only", 0, 18),
+                                        ("dense", 15, 3), ("single-app", 0, 1)] {
+    let configuration = SliceConfiguration(standardSlices: (0..<standardCount).map {
+        .custom(CustomSlice(name: "Standard \($0)", symbolName: "star"))
+    }, applications: [ApplicationConfiguration(bundleIdentifier: "test.render", displayName: "Test App",
+        slices: (0..<appCount).map { .custom(CustomSlice(name: "App \($0)", symbolName: "circle")) })])
+    let dial = configuration.resolved(for: "test.render")
+    var customState = ModePickerState(dial: dial, application: configuration.applications[0],
+                                      selectedSliceID: dial.clockwiseSlices.first?.id)
+    customState.isArmed = true
+    window.setContentSize(RadialMenuLayout(dial: dial).presentationSize)
+    view.update(customState)
+    let controls = buttons(in: view)
+    check(controls.count == dial.actionCount, "Custom states expose exactly their enabled controls")
+    var selectedID: SliceID?
+    view.onSelectSlice = { selectedID = $0 }
+    for control in controls {
+        let id = SliceID(rawValue: control.identifier!.rawValue)
+        let point = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: view)
+        check(view.menuLayout.slice(at: point)?.id == id, "Native custom targets agree with shared geometry")
+        check(view.hitTest(view.convert(point, to: view.superview)) === control, "Native hit testing reaches custom controls")
+        control.performClick(nil)
+        check(selectedID == id, "Custom native buttons dispatch stable IDs instead of enum tags")
+    }
+    for (index, control) in controls.enumerated() {
+        let frame = control.convert(control.bounds, to: view)
+        check(controls.dropFirst(index + 1).allSatisfy { !frame.intersects($0.convert($0.bounds, to: view)) },
+              "Dense native controls have no overlapping targets")
+    }
+    if dial.actionCount == 0 {
+        let labels = view.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
+        check(labels.first?.stringValue == "No enabled\nslices", "The empty wheel explains its state")
+    }
+    try render("custom-" + name)
+    window.setContentSize(NSSize(width: 280, height: 280))
+    view.fitPresentation(to: NSSize(width: 280, height: 280))
+    for control in controls {
+        let point = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: view)
+        check(view.hitTest(view.convert(point, to: view.superview)) === control,
+              "Scaled presentations preserve native pointer targets")
+    }
+    window.setContentSize(view.menuLayout.presentationSize)
+    view.fitPresentation(to: view.menuLayout.presentationSize)
+    check(view.frame.size == view.bounds.size, "Returning from a scaled preview restores one-to-one coordinates")
+    view.onSelectSlice = nil
+}
+print("Passed \(checks) native view checks; rendered built-in and custom states to \(destination.path)")

@@ -1,38 +1,47 @@
 import Foundation
 
-// Main-queue model. App-specific choices never overwrite the legacy general
-// preference, including when a general mode is selected inside an app profile.
+// Main-queue context backed by the shared customization store. Selection changes
+// never modify another context or rewrite the legacy preference keys.
 final class AppModeContext {
-    private let defaults: UserDefaults
-    private(set) var profile: AppProfile?
+    let store: SliceConfigurationStore
+    private(set) var bundleIdentifier: String?
 
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    init(defaults: UserDefaults = .standard) throws {
+        store = try SliceConfigurationStore(defaults: defaults)
+    }
 
+    init(store: SliceConfigurationStore) { self.store = store }
+
+    var application: ApplicationConfiguration? {
+        store.configuration.applications.first { $0.bundleIdentifier == bundleIdentifier }
+    }
+    var profile: AppProfile? { AppProfile.matching(application?.bundleIdentifier) }
+    var resolvedDial: ResolvedDial { store.configuration.resolved(for: bundleIdentifier) }
+    var currentSlice: SliceDefinition? {
+        let dial = resolvedDial
+        let id = store.configuration.selectedSlice(in: dial)
+        return dial.clockwiseSlices.first { $0.id == id }
+    }
+    var pickerState: ModePickerState {
+        ModePickerState(dial: resolvedDial, application: application, selectedSliceID: currentSlice?.id)
+    }
+    // Built-in compatibility accessors; runtime routes currentSlice, not this fallback.
     var generalMode: Mode {
-        let saved = Mode(savedValue: defaults.string(forKey: "mode"))
-        return Mode.generalModes.contains(saved) ? saved : .scrolling
+        let dial = store.configuration.resolved()
+        let id = store.configuration.selectedSlice(in: dial)
+        return dial.clockwiseSlices.first { $0.id == id }?.builtInMode ?? .scrolling
     }
+    var currentMode: Mode { currentSlice?.builtInMode ?? .scrolling }
 
-    var currentMode: Mode {
-        guard let profile = profile,
-              let saved = defaults.string(forKey: preferenceKey(profile)) else { return generalMode }
-        return profile.availableModes.first { $0.savedValue == saved } ?? generalMode
-    }
+    func activate(bundleIdentifier: String?) { self.bundleIdentifier = bundleIdentifier }
 
-    func activate(bundleIdentifier: String?) {
-        profile = AppProfile.matching(bundleIdentifier)
+    @discardableResult
+    func selectSlice(_ id: SliceID) -> Bool {
+        (try? store.select(id, for: bundleIdentifier)) ?? false
     }
 
     @discardableResult
-    func select(_ mode: Mode) -> Bool {
-        guard (profile?.availableModes ?? Mode.generalModes).contains(mode) else { return false }
-        defaults.set(mode.savedValue, forKey: profile.map(preferenceKey) ?? "mode")
-        return true
-    }
-
-    private func preferenceKey(_ profile: AppProfile) -> String {
-        "appMode.\(profile.bundleIdentifier)"
-    }
+    func select(_ mode: Mode) -> Bool { selectSlice(.builtIn(mode)) }
 }
 
 // The HID callback runs off the main queue. Stamp each report before enqueueing

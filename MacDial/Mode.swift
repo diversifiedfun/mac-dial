@@ -1,6 +1,6 @@
 import Foundation
 
-enum Mode: String, CaseIterable {
+enum Mode: String, CaseIterable, Codable {
     case scrolling
     case playback
     case zoom
@@ -98,7 +98,7 @@ struct AppProfile: Equatable {
     let title: String
     let modes: [Mode]
 
-    var availableModes: [Mode] { Mode.generalModes + modes }
+    var availableModes: [Mode] { Mode.generalModes + modes.reversed() }
 
     static let lightroom = AppProfile(bundleIdentifier: "com.adobe.LightroomClassicCC7",
                                      title: "Lightroom", modes: [.lightroomCrop, .lightroomFineTune, .lightroomBrush])

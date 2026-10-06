@@ -1071,7 +1071,7 @@ check(media == [NX_KEYTYPE_PLAY, NX_KEYTYPE_PLAY, NX_KEYTYPE_NEXT], "Playback do
 // Lightroom is a flat sequence; the parent group is not an extra stop.
 let lightroomModes = AppProfile.lightroom.availableModes
 check(Mode.generalModes == [.scrolling, .playback, .zoom, .undoRedo, .brightness], "Five standard modes have the requested order")
-check(lightroomModes == [.scrolling, .playback, .zoom, .undoRedo, .brightness, .lightroomCrop, .lightroomFineTune, .lightroomBrush],
+check(lightroomModes == [.scrolling, .playback, .zoom, .undoRedo, .brightness, .lightroomBrush, .lightroomFineTune, .lightroomCrop],
       "Eight choices have the requested clockwise order")
 for start in lightroomModes {
     var picker = ModePickerState(selectedMode: start, profile: .lightroom)
@@ -1098,7 +1098,7 @@ check(unavailable.selectedMode == .scrolling && !unavailable.select(.lightroomBr
 let suite = "MacDial.Tests." + UUID().uuidString
 let defaults = UserDefaults(suiteName: suite)!
 defaults.set("zoom", forKey: "mode")
-let context = AppModeContext(defaults: defaults)
+let context = try! AppModeContext(defaults: defaults)
 context.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
 check(context.currentMode == .zoom, "First Lightroom visit inherits the general mode")
 check(defaults.string(forKey: "appMode." + AppProfile.lightroom.bundleIdentifier) == nil,
@@ -1115,31 +1115,31 @@ check(context.currentMode == .lightroomFineTune, "Returning restores the last Li
 context.select(.scrolling)
 context.activate(bundleIdentifier: nil)
 check(context.currentMode == .playback, "A general selection inside Lightroom is also kept separate")
-let relaunched = AppModeContext(defaults: defaults)
+let relaunched = try! AppModeContext(defaults: defaults)
 relaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
 check(relaunched.currentMode == .scrolling, "A general choice in Lightroom survives relaunch")
 defaults.set("unknown-future-mode", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
-check(relaunched.currentMode == .playback, "An unknown app preference falls back to the saved general mode")
+check(relaunched.currentMode == .scrolling, "Legacy preference changes cannot overwrite a migrated selection")
 relaunched.select(.lightroomBrush)
-check(defaults.string(forKey: "appMode." + AppProfile.lightroom.bundleIdentifier) == "lightroomBrush",
-      "Remove keeps the existing saved preference value")
+check(relaunched.store.configuration.applications[0].selectedSliceID == .builtIn(.lightroomBrush),
+      "Remove persists under its stable built-in slice identity")
 defaults.set("lightroomBrush", forKey: "appMode." + AppProfile.lightroom.bundleIdentifier)
-let reopened = AppModeContext(defaults: defaults)
+let reopened = try! AppModeContext(defaults: defaults)
 reopened.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
 check(reopened.currentMode == .lightroomBrush && reopened.currentMode.title == "Remove",
       "An existing lightroomBrush preference reopens as Remove")
 relaunched.activate(bundleIdentifier: "com.adobe.Lightroom")
 check(relaunched.profile == nil && relaunched.currentMode == .playback, "Cloud Lightroom does not match the Classic profile")
-check(relaunched.select(.undoRedo) && defaults.string(forKey: "mode") == "undoRedo",
-      "Undo/Redo saves as a standard mode")
-let historyRelaunched = AppModeContext(defaults: defaults)
+check(relaunched.select(.undoRedo) && relaunched.store.configuration.selectedStandardSliceID == .builtIn(.undoRedo),
+      "Undo/Redo saves as a standard slice without rewriting legacy preferences")
+let historyRelaunched = try! AppModeContext(defaults: defaults)
 check(historyRelaunched.currentMode == .undoRedo, "Standard Undo/Redo survives relaunch")
 historyRelaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
 check(historyRelaunched.currentMode == .lightroomBrush, "Global history mode preserves Lightroom's existing selection")
 check(historyRelaunched.select(.undoRedo), "Undo/Redo can also be selected in Lightroom")
 historyRelaunched.activate(bundleIdentifier: nil)
 historyRelaunched.select(.zoom)
-let contextRelaunched = AppModeContext(defaults: defaults)
+let contextRelaunched = try! AppModeContext(defaults: defaults)
 contextRelaunched.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
 check(contextRelaunched.currentMode == .undoRedo, "Lightroom's Undo/Redo survives a general mode change and relaunch")
 contextRelaunched.activate(bundleIdentifier: nil)
@@ -1187,13 +1187,14 @@ check(groupedLayout.diameter == 432, "Contextual bounds are 432 points")
 let generalLayout = RadialMenuLayout(profile: nil)
 check(generalLayout.segments.map(\.angle) == [90, 18, -54, -126, -198]
       && generalLayout.segments.allSatisfy { $0.sweep == 72 }, "Standard modes occupy five equal wedges")
-check(groupedLayout.segments.filter { $0.outerRadius == 150 }.count == 6
-      && groupedLayout.segments.filter { $0.outerRadius == 150 }.allSatisfy { $0.sweep == 60 },
-      "Five standard modes and Lightroom occupy six equal inner wedges")
-check(groupedLayout.segments.filter { $0.innerRadius == 150 }.map(\.sweep) == [20, 20, 20],
-      "Lightroom children equally divide the parent's outer arc")
+check(groupedLayout.segments.filter { $0.slice != nil && !$0.isApplication }.allSatisfy { abs($0.sweep - 720 / 13) < 0.000001 },
+      "Five standard actions each span about 55.38 degrees")
+check(abs(groupedLayout.appGroupSegment!.sweep - 1080 / 13) < 0.000001,
+      "The nonselectable application group spans all three half-width children")
+check(groupedLayout.segments.filter { $0.slice != nil && $0.isApplication }.allSatisfy { abs($0.sweep - 360 / 13) < 0.000001 },
+      "Lightroom children each span about 27.69 degrees")
 check((0..<360).allSatisfy { degrees in
-    let point = groupedLayout.point(angle: CGFloat(degrees) + 0.5, radius: 183)
+    let point = groupedLayout.point(angle: CGFloat(degrees) + 0.37, radius: 183)
     return groupedLayout.outline.contains(point) == (groupedLayout.mode(at: point) != nil)
         && groupedLayout.outline.compatibleCGPath.contains(point) == (groupedLayout.mode(at: point) != nil)
 }, "The entire outer arc's material mask agrees with selectable wedges")
@@ -1391,12 +1392,12 @@ do {
     let suite = "MacDial.SequenceTests." + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
-    let context = AppModeContext(defaults: defaults)
+    let context = try! AppModeContext(defaults: defaults)
     context.select(.zoom)
     context.activate(bundleIdentifier: "com.editwall.desktop")
     check(context.profile == .editwall && context.currentMode == .zoom, "Editwall initially inherits the general choice")
     check(context.select(.editwallSequence), "Sequence is selectable in Editwall")
-    let relaunched = AppModeContext(defaults: defaults)
+    let relaunched = try! AppModeContext(defaults: defaults)
     relaunched.activate(bundleIdentifier: "com.editwall.desktop")
     check(relaunched.currentMode == .editwallSequence, "Sequence survives relaunch")
     context.activate(bundleIdentifier: AppProfile.lightroom.bundleIdentifier)
@@ -1588,7 +1589,16 @@ for profile: AppProfile? in [nil, .lightroom, .editwall] {
         }
         let center = NSPoint(x: screen.midX, y: screen.midY)
         let frame = layout.frame(around: center, in: screen, padding: RadialMenuLayout.effectPadding)
-        check(frame.midX == center.x && frame.midY == center.y, "An unconstrained wheel remains centered on the pointer")
+        check(frame.midX == center.x && frame.midY == center.y + 48,
+              "An unconstrained wheel opens 48 points above the pointer")
+        let localPointer = NSPoint(x: layout.center.x, y: layout.center.y - 48)
+        check(layout.mode(at: localPointer) == nil,
+              "The opening pointer stays inside the nonselectable center")
+        let highestCenter = screen.maxY - 10 - layout.presentationSize.height / 2
+        let nearTop = NSPoint(x: screen.midX, y: highestCenter - 20)
+        let clamped = layout.frame(around: nearTop, in: screen, padding: RadialMenuLayout.effectPadding)
+        check(clamped.midX == nearTop.x && clamped.midY == highestCenter,
+              "Near the top edge, the upward shift uses only the available space")
     }
 }
 // A chronological clock exercises frame cadence independently of real timers.
@@ -2013,9 +2023,9 @@ do {
     let suite = "MacDial.BrightnessTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
-    let context = AppModeContext(defaults: defaults)
+    let context = try! AppModeContext(defaults: defaults)
     check(context.select(.brightness), "Brightness is available outside app profiles")
-    check(AppModeContext(defaults: defaults).currentMode == .brightness, "Brightness survives relaunch")
+    check(try! AppModeContext(defaults: defaults).currentMode == .brightness, "Brightness survives relaunch")
     for profile in [AppProfile.lightroom, .editwall] {
         context.activate(bundleIdentifier: profile.bundleIdentifier)
         check(context.currentMode == .brightness, "App profiles inherit general Brightness")
@@ -2215,4 +2225,5 @@ do {
           "A failed native write cannot succeed just because readback already matches")
 }
 
+runDynamicSliceChecks { check($0, $1) }
 print("Passed \(checks) checks: gestures, contextual routing, preferences, geometry and recorded events.")

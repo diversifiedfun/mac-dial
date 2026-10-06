@@ -182,18 +182,32 @@ final class GalleryDelegate: NSObject, NSApplicationDelegate {
             let wheel = RadialMenuView()
             wheel.preferredAppearance = argument("--style").flatMap(RadialMenuAppearance.init(rawValue:)) ?? .automatic
             var state = ModePickerState(selectedMode: profile?.modes.first ?? .scrolling, profile: profile)
+            if index == 1, let scenario = argument("--scenario") {
+                let standardCount = scenario == "dense" ? 15 : 0
+                let appCount = scenario == "empty" ? 0 : scenario == "single-app" ? 1 : scenario == "app-only" ? 18 : 3
+                let app = ApplicationConfiguration(bundleIdentifier: contextual.bundleIdentifier, displayName: contextual.title,
+                    slices: (0..<appCount).map { .custom(CustomSlice(name: "App action \($0 + 1)", symbolName: "star")) })
+                let configuration = SliceConfiguration(standardSlices: (0..<standardCount).map {
+                    $0 < Mode.generalModes.count ? .builtIn(Mode.generalModes[$0])
+                        : .custom(CustomSlice(name: "Action \($0 + 1)", symbolName: "circle"))
+                }, applications: [app])
+                let dial = configuration.resolved(for: app.bundleIdentifier)
+                state = ModePickerState(dial: dial, application: app, selectedSliceID: dial.clockwiseSlices.first?.id)
+            }
             state.isArmed = true
             wheel.update(state)
             wheel.updateDisplayOptions(reduceTransparency: CommandLine.arguments.contains("--reduce-transparency"),
                                        increasedContrast: CommandLine.arguments.contains("--increase-contrast"),
                                        reduceMotion: CommandLine.arguments.contains("--reduce-motion"))
             let size = wheel.menuLayout.presentationSize
-            wheel.frame.origin = NSPoint(x: CGFloat(index) * 460 + (460 - size.width) / 2,
-                                         y: (500 - size.height) / 2)
+            let scaled = min(size.width, 460)
+            wheel.fitPresentation(to: NSSize(width: scaled, height: scaled))
+            wheel.frame.origin = NSPoint(x: CGFloat(index) * 460 + (460 - scaled) / 2,
+                                         y: (500 - scaled) / 2)
             background.addSubview(wheel)
-            wheel.onHighlight = { [weak wheel] mode in state.select(mode); wheel?.update(state) }
+            wheel.onHighlightSlice = { [weak wheel] id in state.selectSlice(id); wheel?.update(state) }
             wheel.onMove = { [weak wheel] steps in state.move(by: steps); wheel?.update(state) }
-            wheel.onSelect = { [weak wheel] mode in state.select(mode); wheel?.showConfirmation(state) }
+            wheel.onSelectSlice = { [weak wheel] id in state.selectSlice(id); wheel?.showConfirmation(state) }
             wheel.onConfirm = { [weak wheel] in wheel?.showConfirmation(state) }
             wheels.append(wheel)
         }

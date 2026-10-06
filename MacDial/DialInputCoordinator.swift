@@ -9,6 +9,10 @@ final class DialInputCoordinator {
     var onRotation: ((Dial.Rotation, Int) -> Void)?
     var onCancelAction: (() -> Void)?
     var onCommit: ((Mode) -> Bool)?
+    var onCommitSlice: ((SliceID) -> Bool)?
+    // Production supplies a configuration snapshot; legacy tests can continue
+    // using currentMode/currentProfile. Snapshot is captured only on opening.
+    var currentPicker: (() -> ModePickerState)?
     var onConfirmation: ((ModePickerState) -> Void)?
     var onPickerChanged: ((ModePickerState?) -> Void)?
     var onFeedback: (() -> Void)?
@@ -114,8 +118,12 @@ final class DialInputCoordinator {
     }
 
     func highlight(_ mode: Mode, feedback: Bool = true) {
+        highlightSlice(.builtIn(mode), feedback: feedback)
+    }
+
+    func highlightSlice(_ id: SliceID, feedback: Bool = true) {
         guard picker?.isArmed == true, !physicallyPressed else { return }
-        if picker?.select(mode) == true {
+        if picker?.selectSlice(id) == true {
             if feedback { onFeedback?() }
             publish()
         } else {
@@ -124,23 +132,32 @@ final class DialInputCoordinator {
     }
 
     func confirmSelection(_ selectedMode: Mode? = nil) {
-        if let mode = selectedMode {
-            guard picker?.availableModes.contains(mode) == true else { return }
+        confirmSlice(selectedMode.map(SliceID.builtIn))
+    }
+
+    func confirmSlice(_ id: SliceID? = nil) {
+        if let id = id {
+            guard picker?.dial.contains(id) == true else { return }
             guard picker?.isArmed == true, !physicallyPressed else { return }
-            picker?.select(mode)
+            picker?.selectSlice(id)
         }
         guard let picker = picker, picker.isArmed, !physicallyPressed else { return }
         commitSelection(picker)
     }
 
     private func commitSelection(_ selection: ModePickerState? = nil) {
-        guard let picker = selection ?? picker, picker.isArmed else { return }
+        guard let picker = selection ?? picker, picker.isArmed,
+              let id = picker.selectedSliceID else { return }
         clearPicker(restoreHardware: false)
         // Enqueue the confirmation pulse before restoring normal sensitivity.
         // The production callbacks perform HID work away from the UI thread.
         defer { if self.picker == nil { _ = onMenuNavigationChanged?(false) } }
         let generation = pickerGeneration
-        if onCommit?(picker.selectedMode) == true, generation == pickerGeneration {
+        let committed: Bool
+        if let onCommitSlice = onCommitSlice { committed = onCommitSlice(id) }
+        else if let mode = picker.selectedSlice?.builtInMode { committed = onCommit?(mode) == true }
+        else { committed = false }
+        if committed, generation == pickerGeneration {
             onConfirmation?(picker)
             guard generation == pickerGeneration else { return }
             onFeedback?()
@@ -181,8 +198,14 @@ final class DialInputCoordinator {
     private func longPressed() {
         if picker == nil {
             onCancelAction?()
-            picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile(),
-                                     startPosition: radialMenuStartPosition)
+            if let currentPicker = currentPicker {
+                let snapshot = currentPicker()
+                picker = ModePickerState(dial: snapshot.dial, application: snapshot.application,
+                    selectedSliceID: snapshot.selectedSliceID, startPosition: radialMenuStartPosition)
+            } else {
+                picker = ModePickerState(selectedMode: currentMode(), profile: currentProfile(),
+                                         startPosition: radialMenuStartPosition)
+            }
             pickerGeneration += 1
             guard onMenuNavigationChanged?(true) ?? true else {
                 cancel()

@@ -20,3 +20,10 @@ extension Controller {
     func onPressBegan() {}
     func onCancel() {}
 }
+
+// Empty configurations have no implicit fallback action.
+final class NoActionController: Controller {
+    func onDown() {}
+    func onUp() {}
+    func onRotate(_ rotation: Dial.Rotation, _ scrollDirection: Int) {}
+}

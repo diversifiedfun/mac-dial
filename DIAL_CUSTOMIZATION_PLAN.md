@@ -1,8 +1,8 @@
-# Mac Dial customization — implementation plan
+# Mac Dial customization — completed
 
 ## Status and tracking
 
-**Current phase:** Phases 1–4 implemented. The native customization window, application chooser, icon search, shortcut recording, immediate persistence, and Undo/Redo are verified. Automated suites and the signed Release build pass. Final acceptance still needs live shortcut delivery, physical Dial checks, and the remaining display/accessibility manual checks.
+**Status: Complete — 2026-10-06.** Closed at the user's request. The customization implementation, UI refinements, application removal, and permission recovery are committed in `84809a0`. Automated verification and the local Release build/signature checks pass. The user marked the remaining manual customization acceptance items complete before this closeout. No customization implementation or acceptance work remains in this plan; distribution preparation is separate.
 
 - [x] Inspect the existing settings, mode selection, input routing, and test harness.
 - [x] Create three customization mockups.
@@ -13,7 +13,7 @@
 - [x] Implement capacity resolution and shared dial geometry.
 - [x] Integrate dynamic slices and custom shortcut execution.
 - [x] Implement the customization window and application chooser.
-- [ ] Complete integrated behavior, visual, and physical-device verification.
+- [x] Complete integrated behavior, visual, and physical-device verification.
 - [x] Produce and verify the release build.
 
 Approved visual reference: [app-sidebar-v2.png](../design/dial-customization/app-sidebar-v2.png).
@@ -21,7 +21,7 @@ Layout revision (2026-10-06): keep the application sidebar; place the linked pre
 Geometry revision (2026-10-06): app subslices now use half the angular width of standard slices. This replaces the original equal-angle rule; ordering and the 18-action capacity are unchanged.
 The mockup establishes layout and visual direction. The geometry rules below are authoritative; generated wedge angles are illustrative.
 
-Update this checklist as work completes. Record verification evidence and unresolved issues in the progress log. Do not mark a check complete solely because implementation exists.
+This is the completed implementation record. Historical progress entries retain the evidence available at each milestone; the completion status and release follow-ups describe the final handoff.
 
 ## First step: establish a baseline
 
@@ -98,12 +98,12 @@ This makes the top app action the first counterclockwise step from the first sta
 - [x] Keep hold reserved for opening the picker.
 - [x] Verify the foreground process before sending; app-specific shortcuts also require the matching bundle identifier.
 - [x] Cancel pending input on context changes, configuration edits, picker opening, disconnect, sleep, and session changes.
-- [x] Wire input suppression to the customization window lifecycle. Opening, closing, and app activation changes cancel pending input. Preview selection never calls runtime selection or event delivery; recording consumes keystrokes locally. Physical HID suppression remains part of final device acceptance.
+- [x] Wire input suppression to the customization window lifecycle. Opening, closing, and app activation changes cancel pending input. Preview selection never calls runtime selection or event delivery; recording consumes keystrokes locally. Physical device acceptance was marked complete by the user at closeout.
 - [x] Test emitted events through recording-only sinks before live shortcut verification.
 
 **Completion criteria:** Custom actions work through the existing input lifecycle, built-in actions remain intact, and stale or delayed events cannot execute in a new context.
 
-**Evidence:** Configuration plus **146,733 behavior/geometry checks** and **1,848 native view checks** pass. Custom checks cover modifiers, repeated ticks, exclusive clicks, No Action, cancellation during a batch, and focus changes. The Apple Silicon Release build and strict signature verification pass. Live custom-shortcut delivery and physical Dial behavior remain unverified.
+**Evidence:** Configuration plus **146,733 behavior/geometry checks** and **1,848 native view checks** pass. Custom checks cover modifiers, repeated ticks, exclusive clicks, No Action, cancellation during a batch, and focus changes. The Apple Silicon Release build and strict signature verification pass. Live custom-shortcut delivery and physical Dial acceptance were marked complete by the user at closeout.
 
 ## Phase 4: customization window
 
@@ -161,17 +161,25 @@ Application discovery scans `/Applications`, `~/Applications`, `/System/Applicat
 
 - [x] Compare the native window against the approved mockup: three panes, linked preview, native controls, 2:1 standard/app angles, and no independent context dropdown.
 - [x] Inspect light/dark appearance and dense 18-action configurations in the native window.
-- [ ] Complete a manual settings-window pass with Classic and accessibility overrides (the shared renderer already has automated coverage).
+- [x] Complete a manual settings-window pass with Classic and accessibility overrides (the shared renderer already has automated coverage).
 - [x] Verify app-only/empty previews and minimum-window bounds with native tests; inspect the app-only 18-action window.
-- [ ] Verify the completed feature on physical multi-display setups and at display edges (geometry placement is covered automatically).
-- [ ] Exercise real shortcut delivery in a disposable document.
-- [ ] Verify physical Dial rotation, click/double-click, hold, context switching, and disconnect/reconnect separately.
+- [x] Verify the completed feature on physical multi-display setups and at display edges (geometry placement is covered automatically).
+- [x] Exercise real shortcut delivery in a disposable document.
+- [x] Verify physical Dial rotation, click/double-click, hold, context switching, and disconnect/reconnect separately.
+
+The manual Classic/accessibility, physical-display, live-shortcut, and physical-Dial items above were marked complete by the user before this document was closed. They are user-reported acceptance, distinct from the automated and native-preview checks performed by the coding agent.
 
 ### Release
 
 - [x] Complete the Apple Silicon Release build and strict signature verification.
 - [x] Record completed checks and remaining limitations in project documentation.
 - [x] Produce the verified local build. Installation over the user's application is a separate step.
+
+### Release follow-ups outside the completed implementation
+
+Distribution preparation remains separate: actual permission revocation/recovery and permission continuity across consistently signed updates have no recorded test result here. Recovery has been tested with simulated grants; local builds remain ad-hoc signed.
+
+Latest recorded results: **491 customization**, **21 permission**, **7,689 configuration**, **146,733 behavior/geometry**, and **1,848 native rendering checks** passed across the relevant suites. The latest Release build and strict signature verification passed. Installation and distribution signing are separate release tasks.
 
 ## Defaults and boundaries
 
@@ -191,10 +199,11 @@ Application discovery scans `/Applications`, `~/Applications`, `/System/Applicat
 | Baseline verification | Complete | 2,012 behavior checks, 1,647 native view checks, Release build and signature verification passed. Native tests require host access. |
 | Configuration and migration | Complete | 7,689 configuration checks passed, including cross-process persistence; 2,012 existing behavior checks still pass. Foundation Release build and signature verification passed. |
 | Resolver and geometry | Complete | Runtime and settings preview share resolution and geometry; 2:1 standard/app angles, app ordering, adaptive radius, full circles, and empty/overflow states verified. |
-| Runtime and shortcuts | Implemented | Dynamic routing, custom shortcuts, and window input suppression connected. 146,733 behavior/geometry checks and 1,848 native checks pass; physical/live acceptance remains. |
+| Runtime and shortcuts | Complete | Dynamic routing, custom shortcuts, and window input suppression connected. 146,733 behavior/geometry checks and 1,848 native checks pass; physical/live acceptance marked complete by the user. |
 | Customization UI | Complete | Native sidebar, lists, editor, preview, app chooser, icon search, shortcut recorder, persistence and Undo/Redo implemented. Isolated native tests and interaction checks pass. |
 | Layout refinement (2026-10-06) | Complete | Sidebar scrollbar appears only when needed; compact slice rows omit type subtitles while keeping Off/overflow labels. Preview and details swapped; built-in explanatory footer removed. |
-| Acceptance and release | In progress | Full automated suites and Release build/signature pass. Native light/dark, dense preview and editing interactions checked. Live shortcuts, physical Dial and remaining manual display/accessibility checks are pending. |
+| Acceptance and local build | Complete | Automated suites and Release build/signature pass. Native light/dark, dense preview and editing interactions checked. Remaining manual customization acceptance marked complete by the user. |
+| Final handoff (2026-10-06) | Complete | User requested closure after implementation commit `84809a0`; this document records the completed scope and remaining release validation. |
 
 ### Verification logs
 
@@ -214,7 +223,7 @@ Application discovery scans `/Applications`, `~/Applications`, `/System/Applicat
 - Full native renderer checks: [`customization-window-render.log`](../build/customization-window-render.log).
 - Completed UI build/signature: [`customization-window-build.log`](../build/customization-window-build.log).
 
-Logs and build outputs are local artifacts. The cross-process preference test also needs host preference-service access; its temporary UUID-named suite is removed after verification. The customization preview also uses temporary UUID-named preferences, removed on normal exit. Physical-device checks and live custom-shortcut delivery have not yet been performed. The installed application has not been replaced.
+Logs and build outputs are local artifacts. The cross-process preference test also needs host preference-service access; its temporary UUID-named suite is removed after verification. The customization preview also uses temporary UUID-named preferences, removed on normal exit. Physical-device checks and live custom-shortcut delivery were marked complete by the user at closeout. The coding agent did not replace the installed application.
 
 Layout revision verification: `customization-layout-tests.log` (379 native customization checks) and `customization-layout-build.log` (Release build/signature). Native Standard and custom-slice layouts inspected in the isolated preview.
 

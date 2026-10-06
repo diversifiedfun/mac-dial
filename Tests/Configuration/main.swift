@@ -37,6 +37,50 @@ func withDefaults(_ test: (UserDefaults) throws -> Void) rethrows {
 let lightroomID = AppProfile.lightroom.bundleIdentifier
 let editwallID = AppProfile.editwall.bundleIdentifier
 
+// Upgrade the previous shortcut-only schema without replacing existing slices.
+try withDefaults { defaults in
+    let custom = SliceDefinition.custom(CustomSlice(name: "Existing shortcut", gestures: SliceGestures(
+        click: .keyboardShortcut(KeyboardShortcut(keyCode: 122, modifiers: [.command])))))
+    var old = SliceConfiguration.builtInDefaults
+    old.standardSlices.append(custom)
+    old.selectedStandardSliceID = custom.id
+    old.version = 1
+    let original = try JSONEncoder().encode(old)
+    defaults.set(original, forKey: SliceConfigurationStore.storageKey)
+    let store = try SliceConfigurationStore(defaults: defaults)
+    var expected = old
+    expected.version = SliceConfiguration.currentVersion
+    check(store.loadStatus == .loaded && store.configuration == expected, "Version 1 upgrade preserves all slices, shortcuts and selections")
+    check(defaults.data(forKey: SliceConfigurationStore.storageKey) == original, "Loading old settings leaves their original bytes intact")
+    let brightness = SliceDefinition.custom(CustomSlice(name: "Custom brightness", gestures: SliceGestures(
+        rotateLeft: .brightnessDown, rotateRight: .brightnessUp, click: .brightnessDown, doubleClick: .brightnessUp)))
+    try store.edit { $0.standardSlices.append(brightness) }
+    let bytes = defaults.data(forKey: SliceConfigurationStore.storageKey)!
+    check(try JSONDecoder().decode(SliceConfiguration.self, from: bytes).version == SliceConfiguration.currentVersion, "Brightness actions use a versioned envelope older builds will protect")
+    check(try SliceConfigurationStore(defaults: defaults).configuration == store.configuration, "Brightness actions persist alongside existing keyboard shortcuts")
+}
+
+// Version 2 brightness assignments stay readable in the new action groups.
+try withDefaults { defaults in
+    var old = SliceConfiguration.builtInDefaults
+    old.version = 2
+    old.standardSlices.append(.custom(CustomSlice(gestures: SliceGestures(rotateLeft: .brightnessDown, rotateRight: .brightnessUp))))
+    defaults.set(try JSONEncoder().encode(old), forKey: SliceConfigurationStore.storageKey)
+    let store = try SliceConfigurationStore(defaults: defaults)
+    guard case .custom(let custom) = store.configuration.standardSlices.last!.content else { fatalError() }
+    check(custom.gestures.rotateLeft.systemAction == .brightnessDown && custom.gestures.rotateRight.systemAction == .brightnessUp,
+        "Existing brightness actions resolve to the macOS action catalog")
+    for action in MacOSAction.allCases {
+        try store.edit { $0.standardSlices.append(.custom(CustomSlice(name: action.title.prefix(20).description,
+            gestures: SliceGestures(click: .macOSAction(action))))) }
+    }
+    try store.edit { $0.standardSlices.append(.custom(CustomSlice(gestures: SliceGestures(
+        click: .keyboardShortcut(KeyboardShortcut(keyCode: 53)),
+        doubleClick: .keyboardShortcut(KeyboardShortcut(keyCode: 53, modifiers: [.command])))))) }
+    check(try SliceConfigurationStore(defaults: defaults).configuration == store.configuration,
+        "Every macOS action and Escape shortcuts persist alongside older brightness assignments")
+}
+
 // Migration uses the real legacy preference keys and built-in mode identifiers.
 try withDefaults { defaults in
     defaults.set("zoom", forKey: "mode")
@@ -117,7 +161,7 @@ try withDefaults { defaults in
     let store = try SliceConfigurationStore(defaults: defaults)
     let original = store.configuration
     var candidate = original
-    candidate.version = 2
+    candidate.version = SliceConfiguration.currentVersion + 1
     rejects({ try store.replace(with: candidate) }, "Unknown schema cannot be saved")
     candidate = original
     candidate.applications.append(candidate.applications[0])

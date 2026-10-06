@@ -184,7 +184,7 @@ final class RadialMenuView: NSView {
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityLabel("\(mode.title) mode")
             button.toolTip = mode.usageHelp
-            let hints = mode.builtInMode.map { "\($0.turnHint). \($0.clickHint)." } ?? "Custom keyboard shortcuts."
+            let hints = mode.builtInMode.map { "\($0.turnHint). \($0.clickHint)." } ?? "Custom actions."
             button.setAccessibilityHelp([mode.usageHelp, hints, "Turn to choose; click to select."].compactMap { $0 }.joined(separator: " "))
             if segment.isApplication { appGroup.addSubview(button) }
             else { addSubview(button) }

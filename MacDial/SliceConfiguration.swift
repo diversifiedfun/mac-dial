@@ -39,9 +39,60 @@ struct KeyboardShortcut: Codable, Equatable {
     }
 }
 
+enum MacOSAction: String, Codable, CaseIterable {
+    case brightnessDown, brightnessUp
+    case volumeDown, volumeUp, mute
+    case playPause, previousTrack, nextTrack
+    case keyboardBacklightDown, keyboardBacklightUp, keyboardBacklightToggle
+    case missionControl, showDesktop, spotlight
+
+    var title: String {
+        switch self {
+        case .brightnessDown: return "Brightness Down"
+        case .brightnessUp: return "Brightness Up"
+        case .volumeDown: return "Volume Down"
+        case .volumeUp: return "Volume Up"
+        case .mute: return "Mute / Unmute"
+        case .playPause: return "Play / Pause"
+        case .previousTrack: return "Previous Track"
+        case .nextTrack: return "Next Track"
+        case .keyboardBacklightDown: return "Keyboard Backlight Down"
+        case .keyboardBacklightUp: return "Keyboard Backlight Up"
+        case .keyboardBacklightToggle: return "Toggle Keyboard Backlight"
+        case .missionControl: return "Mission Control"
+        case .showDesktop: return "Show Desktop"
+        case .spotlight: return "Spotlight"
+        }
+    }
+
+    // macOS lets users change these shortcuts. Display the defaults in the UI
+    // so customized shortcuts can be assigned via Keyboard Shortcut instead.
+    var desktopShortcut: KeyboardShortcut? {
+        switch self {
+        case .missionControl: return KeyboardShortcut(keyCode: 126, modifiers: [.control])
+        case .showDesktop: return KeyboardShortcut(keyCode: 103)
+        case .spotlight: return KeyboardShortcut(keyCode: 49, modifiers: [.command])
+        default: return nil
+        }
+    }
+}
+
 enum SliceAction: Codable, Equatable {
     case noAction
     case keyboardShortcut(KeyboardShortcut)
+    case macOSAction(MacOSAction)
+    // Retain decoding of brightness actions saved by version 2.
+    case brightnessDown
+    case brightnessUp
+
+    var systemAction: MacOSAction? {
+        switch self {
+        case .macOSAction(let action): return action
+        case .brightnessDown: return .brightnessDown
+        case .brightnessUp: return .brightnessUp
+        default: return nil
+        }
+    }
 }
 
 struct SliceGestures: Codable, Equatable {
@@ -100,7 +151,7 @@ struct SliceDefinition: Codable, Equatable, Identifiable {
 
     var usageHelp: String? {
         if let mode = builtInMode { return mode.usageHelp }
-        return "Custom keyboard shortcuts. Hold to choose a slice."
+        return "Custom actions. Hold to choose a slice."
     }
 }
 
@@ -150,7 +201,7 @@ struct ResolvedDial: Equatable {
 }
 
 struct SliceConfiguration: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 3
     var version = Self.currentVersion
     var standardSlices: [SliceDefinition]
     var applications: [ApplicationConfiguration]

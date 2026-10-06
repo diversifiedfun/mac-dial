@@ -39,10 +39,13 @@ final class SliceConfigurationStore {
             // this version, but must still be recognized as a newer document.
             struct Envelope: Decodable { let version: Int }
             let version = try JSONDecoder().decode(Envelope.self, from: data).version
-            guard version == SliceConfiguration.currentVersion else {
+            guard (1...SliceConfiguration.currentVersion).contains(version) else {
                 throw ConfigurationError.unsupportedVersion(version)
             }
-            let decoded = try JSONDecoder().decode(SliceConfiguration.self, from: data)
+            var decoded = try JSONDecoder().decode(SliceConfiguration.self, from: data)
+            // Versions 2 and 3 add system actions. Existing shortcuts and slice
+            // identities are unchanged; write the new envelope on the next edit.
+            decoded.version = SliceConfiguration.currentVersion
             try decoded.validate()
             configuration = decoded
             loadStatus = .loaded

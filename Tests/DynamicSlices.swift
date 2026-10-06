@@ -99,6 +99,106 @@ func runDynamicSliceChecks(_ check: (Bool, String) -> Void) {
         h.input.cancel()
     }
 
+    do {
+        let clock = Clock()
+        var pid: pid_t? = 42
+        var events: [(Int32, [NSEvent.ModifierFlags], Int)] = []
+        var keyboardEvents = 0
+        let controller = CustomSliceController(gestures: SliceGestures(rotateLeft: .brightnessDown,
+            rotateRight: .brightnessUp, click: .brightnessDown, doubleClick: .brightnessUp),
+            now: { clock.time }, doubleClickInterval: { 0.3 }, schedule: clock.schedule,
+            targetProcess: { pid }, post: { _, _ in keyboardEvents += 1 },
+            postSystemKey: { events.append(($0, $1, $2)) })
+        controller.onRotate(.CounterClockwise(2), -1)
+        controller.onRotate(.Clockwise(3), -1)
+        check(events.map { $0.0 } == [NX_KEYTYPE_BRIGHTNESS_DOWN, NX_KEYTYPE_BRIGHTNESS_DOWN,
+            NX_KEYTYPE_BRIGHTNESS_UP, NX_KEYTYPE_BRIGHTNESS_UP, NX_KEYTYPE_BRIGHTNESS_UP],
+            "Custom brightness uses system brightness controls once per tick, independent of Scroll Direction")
+        check(events.allSatisfy { $0.1 == [.shift, .option] && $0.2 == 1 } && keyboardEvents == 0,
+            "Brightness sends fine system steps without F1/F2 keyboard events")
+        events.removeAll()
+        controller.onRotate(.Clockwise(0), 1)
+        controller.onRotate(.CounterClockwise(-1), 1)
+        controller.onUp()
+        check(events.isEmpty, "Brightness ignores nonpositive ticks and waits to classify clicks")
+        clock.advance(0.3)
+        check(events.map { $0.0 } == [NX_KEYTYPE_BRIGHTNESS_DOWN], "A single click runs its brightness action once")
+        events.removeAll()
+        controller.onUp()
+        controller.onPressBegan()
+        controller.onUp()
+        clock.advance(1)
+        check(events.map { $0.0 } == [NX_KEYTYPE_BRIGHTNESS_UP], "A double click runs only its assigned brightness action")
+        events.removeAll()
+        controller.onUp()
+        controller.onCancel()
+        clock.advance(1)
+        check(events.isEmpty, "Hold cancellation prevents delayed brightness actions")
+        controller.onUp()
+        pid = 84
+        clock.advance(1)
+        check(events.isEmpty, "Focus changes prevent stale brightness clicks")
+        pid = nil
+        controller.onRotate(.Clockwise(2), 1)
+        check(events.isEmpty, "Permission or context rejection prevents brightness output")
+    }
+    for cancelDuringPost in [false, true] {
+        var pid: pid_t? = 42
+        var count = 0
+        var controller: CustomSliceController!
+        controller = CustomSliceController(gestures: SliceGestures(rotateRight: .brightnessUp),
+            targetProcess: { pid }, postSystemKey: { _, _, _ in
+                count += 1
+                if cancelDuringPost { controller.onCancel() } else { pid = 84 }
+            })
+        controller.onRotate(.Clockwise(4), 1)
+        check(count == 1, "Context changes or cancellation stop remaining brightness ticks")
+    }
+
+    let systemKeys: [(MacOSAction, Int32, [NSEvent.ModifierFlags])] = [
+        (.brightnessDown, NX_KEYTYPE_BRIGHTNESS_DOWN, [.shift, .option]),
+        (.brightnessUp, NX_KEYTYPE_BRIGHTNESS_UP, [.shift, .option]),
+        (.volumeDown, NX_KEYTYPE_SOUND_DOWN, [.shift, .option]),
+        (.volumeUp, NX_KEYTYPE_SOUND_UP, [.shift, .option]),
+        (.mute, NX_KEYTYPE_MUTE, []), (.playPause, NX_KEYTYPE_PLAY, []),
+        (.previousTrack, NX_KEYTYPE_PREVIOUS, []), (.nextTrack, NX_KEYTYPE_NEXT, []),
+        (.keyboardBacklightDown, NX_KEYTYPE_ILLUMINATION_DOWN, []),
+        (.keyboardBacklightUp, NX_KEYTYPE_ILLUMINATION_UP, []),
+        (.keyboardBacklightToggle, NX_KEYTYPE_ILLUMINATION_TOGGLE, [])]
+    for (action, key, flags) in systemKeys {
+        var events: [(Int32, [NSEvent.ModifierFlags], Int)] = []
+        var unexpected = 0
+        let controller = CustomSliceController(gestures: SliceGestures(rotateRight: .macOSAction(action)),
+            targetProcess: { 42 }, post: { _, _ in unexpected += 1 },
+            postSystemKey: { events.append(($0, $1, $2)) }, postGlobalKey: { _ in unexpected += 1 })
+        controller.onRotate(.Clockwise(2), 1)
+        check(events.count == 2 && events.allSatisfy { $0.0 == key && $0.1 == flags && $0.2 == 1 } && unexpected == 0,
+            "\(action.title) routes to its system media control with the expected modifiers")
+    }
+    for (action, key, flags): (MacOSAction, Int64, CGEventFlags) in [
+        (.missionControl, 126, .maskControl), (.showDesktop, 103, .maskSecondaryFn), (.spotlight, 49, .maskCommand)] {
+        var events: [CGEvent] = []
+        var unexpected = 0
+        var pid: pid_t? = 42
+        let controller = CustomSliceController(gestures: SliceGestures(rotateRight: .macOSAction(action)),
+            targetProcess: { pid }, post: { _, _ in unexpected += 1 },
+            postSystemKey: { _, _, _ in unexpected += 1 }, postGlobalKey: { events.append($0); pid = 84 })
+        controller.onRotate(.Clockwise(3), 1)
+        check(events.map(\.type) == [.keyDown, .keyUp] && events.allSatisfy {
+            $0.getIntegerValueField(.keyboardEventKeycode) == key && $0.flags == flags
+        } && unexpected == 0, "\(action.title) sends a balanced global shortcut and stops after a focus change")
+    }
+    for modifiers: ShortcutModifiers in [[], [.command]] {
+        var events: [CGEvent] = []
+        let controller = CustomSliceController(gestures: SliceGestures(rotateRight:
+            .keyboardShortcut(KeyboardShortcut(keyCode: 53, modifiers: modifiers))), targetProcess: { 42 },
+            post: { event, _ in events.append(event) })
+        controller.onRotate(.Clockwise(1), 1)
+        check(events.map(\.type) == [.keyDown, .keyUp] && events.allSatisfy {
+            $0.getIntegerValueField(.keyboardEventKeycode) == 53 && $0.flags == (modifiers.isEmpty ? [] : .maskCommand)
+        }, "Escape and modified Escape dispatch as balanced keyboard shortcuts")
+    }
+
     let left = KeyboardShortcut(keyCode: 123, modifiers: [.command, .option])
     let right = KeyboardShortcut(keyCode: 124, modifiers: [.control, .shift])
     let click = KeyboardShortcut(keyCode: 35)

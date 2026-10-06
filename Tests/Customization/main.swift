@@ -108,6 +108,18 @@ for code in UInt16(0)...127 {
 check(KeyboardShortcut.recorded(keyCode: 53, flags: []) == nil, "Escape cancels")
 check(KeyboardShortcut.recorded(keyCode: 72, flags: []) == nil, "Media keys excluded")
 check(KeyboardShortcut.recorded(keyCode: 123, flags: [])?.displayName == "←", "Unmodified arrow")
+let functionCodes: [UInt16] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111]
+for (index, code) in functionCodes.enumerated() {
+    for flags: NSEvent.ModifierFlags in [[], [.function], [.function, .command, .option, .control, .shift]] {
+        let shortcut = KeyboardShortcut.recorded(keyCode: code, flags: flags)
+        let expected = KeyboardShortcut(keyCode: code, modifiers: flags.contains(.command) ? .supported : [])
+        check(shortcut == expected, "F\(index + 1) records without storing Fn as a shortcut modifier")
+        check(shortcut?.displayName == (expected.modifiers.isEmpty ? "" : "⌃⌥⇧⌘") + "F\(index + 1)", "Function key label matches its physical key")
+        let data = try JSONEncoder().encode(expected)
+        let restored = try JSONDecoder().decode(KeyboardShortcut.self, from: data)
+        check(restored == expected, "Function key survives persistence")
+    }
+}
 let discovered = DiscoveredDialApplication.merged([
     .init(id: "b", name: "Beta", url: URL(fileURLWithPath: "/old.app"), running: false),
     .init(id: "a", name: "Alpha", url: URL(fileURLWithPath: "/alpha.app"), running: false),
@@ -333,7 +345,81 @@ for size in [NSSize(width: 1080, height: 740), NSSize(width: 1440, height: 1024)
     }
 }
 func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+// Exercise the actual sheet controls. No shortcuts are posted to other apps.
+for (index, code) in (functionCodes + [53, 53]).enumerated() {
+    var result: KeyboardShortcut?
+    var completions = 0
+    let recorder = DialShortcutRecorder(parent: window.window!, gesture: "Click") {
+        result = $0
+        completions += 1
+    }
+    let sheet = window.window!.attachedSheet!
+    let views = allViews(sheet.contentView!)
+    let mode = views.compactMap { $0 as? NSSegmentedControl }.first!
+    let picker = views.compactMap { $0 as? NSPopUpButton }.first!
+    let use = views.compactMap { $0 as? NSButton }.first { $0.title == "Use Shortcut" }!
+    check(mode.label(forSegment: 1) == "Choose Special Key" && picker.itemTitles.last == "Esc", "Special key picker includes Escape")
+    check(!picker.isEnabled && !use.isEnabled, "Picker is inactive during physical key recording")
+    mode.selectedSegment = 1
+    _ = mode.sendAction(mode.action, to: mode.target)
+    check(picker.isEnabled && use.isEnabled, "Choosing a function key enables explicit assignment")
+    picker.selectItem(at: min(index, 12))
+    let withModifiers = index % 2 == 1
+    for name in ["Command", "Option", "Control", "Shift"] {
+        let modifier = views.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == name }!
+        modifier.state = withModifiers ? .on : .off
+    }
+    use.performClick(nil)
+    check(result == KeyboardShortcut(keyCode: code, modifiers: withModifiers ? .supported : []),
+        "Native selector assigns the special key with the selected modifiers")
+    recorder.finish(nil)
+    check(completions == 1, "Recorder completes only once")
+    RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+}
+do {
+    var completions = 0
+    let recorder = DialShortcutRecorder(parent: window.window!, gesture: "Click") {
+        check($0 == nil, "Cancel does not save the default function key")
+        completions += 1
+    }
+    let views = allViews(window.window!.attachedSheet!.contentView!)
+    let mode = views.compactMap { $0 as? NSSegmentedControl }.first!
+    mode.selectedSegment = 1
+    _ = mode.sendAction(mode.action, to: mode.target)
+    views.compactMap { $0 as? NSButton }.first { $0.title == "Cancel" }!.performClick(nil)
+    recorder.finish(nil)
+    check(completions == 1, "Function key selection can be cancelled")
+    RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+}
 let nameTestID = window.session.selectedID!
+do {
+    let before = store.configuration
+    window.session.undoManager.beginUndoGrouping()
+    for (label, title) in [("Rotate left", "Brightness Down"), ("Rotate right", "Brightness Up")] {
+        let popup = allViews(window.window!.contentView!).compactMap { $0 as? NSPopUpButton }
+            .first { $0.accessibilityLabel() == label + " action" }!
+        check(popup.itemTitles == ["No Action", "Keyboard Shortcut", "macOS Action"], "Action groups are exactly the three requested choices")
+        popup.selectItem(withTitle: "macOS Action")
+        _ = popup.sendAction(popup.action, to: popup.target)
+        let systemPopup = allViews(window.window!.contentView!).compactMap { $0 as? NSPopUpButton }
+            .first { $0.accessibilityLabel() == label + " macOS action" }!
+        check(systemPopup.itemTitles == MacOSAction.allCases.map(\.title), "All system actions appear in the second menu")
+        systemPopup.selectItem(withTitle: title)
+        _ = systemPopup.sendAction(systemPopup.action, to: systemPopup.target)
+        check(window.window!.attachedSheet == nil, "macOS actions do not open the shortcut recorder")
+    }
+    window.session.undoManager.endUndoGrouping()
+    guard case .custom(let custom) = window.session.selected!.content else { fatalError("Expected custom slice") }
+    check(custom.gestures.rotateLeft == .macOSAction(.brightnessDown) && custom.gestures.rotateRight == .macOSAction(.brightnessUp),
+        "Native action menus save both brightness directions")
+    check(try! SliceConfigurationStore(defaults: defaults).configuration == store.configuration, "Native brightness selections persist")
+    let brightnessConfiguration = store.configuration
+    window.session.undoManager.undo()
+    check(store.configuration == before, "Undo restores previous keyboard shortcuts")
+    window.session.undoManager.redo()
+    check(store.configuration == brightnessConfiguration, "Redo restores brightness actions")
+    window.session.undoManager.undo()
+}
 window.session.undoManager.groupsByEvent = false
 for input in ["Exposure Adjustment", "123456789012345678901234", String(repeating: "👩🏽‍💻", count: 21),
               String(repeating: "e\u{301}", count: 21)] {

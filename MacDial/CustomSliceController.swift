@@ -5,6 +5,8 @@ final class CustomSliceController: Controller {
     private let source = CGEventSource(stateID: .hidSystemState)
     private let targetProcess: () -> pid_t?
     private let post: (CGEvent, pid_t) -> Void
+    private let postSystemKey: (Int32, [NSEvent.ModifierFlags], Int) -> Void
+    private let postGlobalKey: (CGEvent) -> Void
     private let now: () -> TimeInterval
     private let doubleClickInterval: () -> TimeInterval
     private let schedule: (TimeInterval, DispatchWorkItem) -> Void
@@ -21,10 +23,16 @@ final class CustomSliceController: Controller {
          targetProcess: @escaping () -> pid_t? = {
              NSWorkspace.shared.frontmostApplication?.processIdentifier
          },
-         post: @escaping (CGEvent, pid_t) -> Void = { $0.postToPid($1) }) {
+         post: @escaping (CGEvent, pid_t) -> Void = { $0.postToPid($1) },
+         postSystemKey: @escaping (Int32, [NSEvent.ModifierFlags], Int) -> Void = {
+             HIDPostAuxKey(key: $0, modifiers: $1, _repeat: $2)
+         },
+         postGlobalKey: @escaping (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) }) {
         self.gestures = gestures
         self.targetProcess = targetProcess
         self.post = post
+        self.postSystemKey = postSystemKey
+        self.postGlobalKey = postGlobalKey
         self.now = now
         self.doubleClickInterval = doubleClickInterval
         self.schedule = schedule
@@ -104,12 +112,31 @@ final class CustomSliceController: Controller {
     }
 
     private func send(_ action: SliceAction, steps: Int, to pid: pid_t) {
-        guard case .keyboardShortcut(let shortcut) = action, shortcut.isValid else { return }
+        if let (key, modifiers) = action.systemAction?.systemKey {
+            let generation = clickGeneration
+            for _ in 0..<steps {
+                guard targetProcess() == pid, generation == clickGeneration else { return }
+                // System controls go to macOS rather than the focused app.
+                postSystemKey(key, modifiers, 1)
+            }
+            return
+        }
+        let shortcut: KeyboardShortcut
+        let isSystemShortcut: Bool
+        if let systemShortcut = action.systemAction?.desktopShortcut {
+            shortcut = systemShortcut
+            isSystemShortcut = true
+        } else if case .keyboardShortcut(let recorded) = action {
+            shortcut = recorded
+            isSystemShortcut = false
+        } else { return }
+        guard shortcut.isValid else { return }
         var flags: CGEventFlags = []
         if shortcut.modifiers.contains(.command) { flags.insert(.maskCommand) }
         if shortcut.modifiers.contains(.option) { flags.insert(.maskAlternate) }
         if shortcut.modifiers.contains(.control) { flags.insert(.maskControl) }
         if shortcut.modifiers.contains(.shift) { flags.insert(.maskShift) }
+        if action.systemAction == .showDesktop { flags.insert(.maskSecondaryFn) }
         let generation = clickGeneration
         for _ in 0..<steps {
             guard let down = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: true),
@@ -119,8 +146,33 @@ final class CustomSliceController: Controller {
             up.flags = flags
             // Finish this pair at its original destination even if focus changes
             // during posting. Remaining steps must never spill into another app.
-            post(down, pid)
-            post(up, pid)
+            if isSystemShortcut {
+                postGlobalKey(down)
+                postGlobalKey(up)
+            } else {
+                post(down, pid)
+                post(up, pid)
+            }
+        }
+    }
+}
+
+
+private extension MacOSAction {
+    var systemKey: (Int32, [NSEvent.ModifierFlags])? {
+        switch self {
+        case .brightnessDown: return (NX_KEYTYPE_BRIGHTNESS_DOWN, [.shift, .option])
+        case .brightnessUp: return (NX_KEYTYPE_BRIGHTNESS_UP, [.shift, .option])
+        case .volumeDown: return (NX_KEYTYPE_SOUND_DOWN, [.shift, .option])
+        case .volumeUp: return (NX_KEYTYPE_SOUND_UP, [.shift, .option])
+        case .mute: return (NX_KEYTYPE_MUTE, [])
+        case .playPause: return (NX_KEYTYPE_PLAY, [])
+        case .previousTrack: return (NX_KEYTYPE_PREVIOUS, [])
+        case .nextTrack: return (NX_KEYTYPE_NEXT, [])
+        case .keyboardBacklightDown: return (NX_KEYTYPE_ILLUMINATION_DOWN, [])
+        case .keyboardBacklightUp: return (NX_KEYTYPE_ILLUMINATION_UP, [])
+        case .keyboardBacklightToggle: return (NX_KEYTYPE_ILLUMINATION_TOGGLE, [])
+        case .missionControl, .showDesktop, .spotlight: return nil
         }
     }
 }

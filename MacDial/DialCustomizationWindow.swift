@@ -430,8 +430,12 @@ final class DialCustomizationWindow: NSWindowController, NSWindowDelegate, NSTab
                 popup.addItem(withTitle: builtInGesture.action)
                 popup.toolTip = builtInGesture.action
             } else {
-                popup.addItems(withTitles: ["No Action", "Keyboard Shortcut"])
-                if case .keyboardShortcut = action { popup.selectItem(at: 1) }
+                popup.addItems(withTitles: ["No Action", "Keyboard Shortcut", "macOS Action"])
+                switch action {
+                case .noAction: popup.selectItem(at: 0)
+                case .keyboardShortcut: popup.selectItem(at: 1)
+                case .macOSAction, .brightnessDown, .brightnessUp: popup.selectItem(at: 2)
+                }
             }
             popup.tag = index
             popup.target = self
@@ -439,6 +443,23 @@ final class DialCustomizationWindow: NSWindowController, NSWindowDelegate, NSTab
             popup.setAccessibilityLabel(label + " action")
             popup.isEnabled = canEdit
             place(popup, 96, top, 165, 30)
+            if let systemAction = action.systemAction, custom != nil {
+                let systemPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+                systemPopup.addItems(withTitles: MacOSAction.allCases.map(\.title))
+                systemPopup.selectItem(withTitle: systemAction.title)
+                systemPopup.tag = index
+                systemPopup.target = self
+                systemPopup.action = #selector(changeMacOSAction(_:))
+                systemPopup.setAccessibilityLabel(label + " macOS action")
+                if let shortcut = systemAction.desktopShortcut {
+                    systemPopup.toolTip = "Uses the macOS default \(shortcut.displayName). If you changed it in System Settings, use Keyboard Shortcut instead."
+                } else {
+                    systemPopup.toolTip = "\(systemAction.title) · Requires hardware or an app that supports this system control."
+                }
+                systemPopup.isEnabled = canEdit
+                place(systemPopup, 267, top, width - 270, 30)
+                continue
+            }
             let record = CustomizationButton(builtInGesture?.shortcut ?? shortcutTitle(action)) { [weak self] in self?.recordGesture(index) }
             record.setAccessibilityLabel(custom == nil ? "\(label) shortcut" : "Record \(label.lowercased()) shortcut")
             record.toolTip = builtInGesture.map { "\($0.action) · \($0.shortcut)" }
@@ -464,7 +485,7 @@ final class DialCustomizationWindow: NSWindowController, NSWindowDelegate, NSTab
         return "—"
     }
     private func setGesture(_ index: Int, id: SliceID, action: SliceAction) {
-        session.updateCustom(id, name: "Change Shortcut") { custom in
+        session.updateCustom(id, name: "Change Action") { custom in
             switch index {
             case 0: custom.gestures.rotateLeft = action
             case 1: custom.gestures.rotateRight = action
@@ -475,8 +496,18 @@ final class DialCustomizationWindow: NSWindowController, NSWindowDelegate, NSTab
     }
     @objc private func changeAction(_ sender: NSPopUpButton) {
         guard let id = session.selectedID else { return }
-        if sender.indexOfSelectedItem == 0 { setGesture(sender.tag, id: id, action: .noAction) }
-        else { recordGesture(sender.tag) }
+        commitName()
+        switch sender.indexOfSelectedItem {
+        case 0: setGesture(sender.tag, id: id, action: .noAction)
+        case 1: recordGesture(sender.tag)
+        case 2: setGesture(sender.tag, id: id, action: .macOSAction(.brightnessDown))
+        default: break
+        }
+    }
+    @objc private func changeMacOSAction(_ sender: NSPopUpButton) {
+        guard let id = session.selectedID, MacOSAction.allCases.indices.contains(sender.indexOfSelectedItem) else { return }
+        commitName()
+        setGesture(sender.tag, id: id, action: .macOSAction(MacOSAction.allCases[sender.indexOfSelectedItem]))
     }
     private func recordGesture(_ index: Int) {
         commitName()

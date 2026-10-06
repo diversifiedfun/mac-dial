@@ -123,6 +123,31 @@ keep their saved order and enabled state. The separate number gutter shows posit
 1–18; later positions are blank and their switches are hidden until moved into
 the first 18 rows.
 
+When recording a custom keyboard shortcut, F1–F12 can be used with or without
+Command, Option, Control, or Shift. On an Apple keyboard, hold **Fn/Globe** while
+pressing the function key if the top row controls brightness or media. If macOS
+intercepts the key, select **Choose Special Key**, pick F1–F12 or **Esc** and any modifiers,
+then click **Use Shortcut**. This assigns the standard function key, not the
+brightness or media action printed on that key.
+
+Pressing Escape while recording still cancels; choose **Esc** from the special-key
+list to assign Escape or a modified Escape shortcut.
+
+Each gesture has three action groups: **No Action**, **Keyboard Shortcut**, and
+**macOS Action**. Selecting macOS Action reveals a second menu with brightness up/down,
+volume up/down, mute/unmute, play/pause, previous/next track, keyboard backlight
+up/down/toggle, Mission Control, Show Desktop, and Spotlight.
+
+For custom brightness control, select **macOS Action → Brightness Down** for Rotate
+left and **macOS Action → Brightness Up** for Rotate right. Brightness and volume
+use fine steps; no recorded modifiers are needed. Hardware and media controls
+require a supported display, keyboard, audio device, or playback app. Mission
+Control, Show Desktop, and Spotlight send the default macOS shortcuts (Control–Up,
+F11, and Command–Space); if you customized those in System Settings, assign your
+shortcut using Keyboard Shortcut instead. Existing brightness assignments are
+preserved in the new group. Close Customize Dial before using the Dial, and select
+your custom slice.
+
 Changes save immediately, with window-scoped **Undo / Redo** (Command-Z and
 Shift-Command-Z). Undo and Redo return to the affected Standard/application group,
 select the edited slice, and scroll it into view. Names commit on Return or when leaving the field; blank names

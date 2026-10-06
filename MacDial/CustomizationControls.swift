@@ -141,8 +141,8 @@ extension KeyboardShortcut {
         return prefix + "Key \(keyCode)"
     }
 
-    static func recorded(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> KeyboardShortcut? {
-        guard keyCode != 53 else { return nil } // Escape belongs to the recorder.
+    static func recorded(keyCode: UInt16, flags: NSEvent.ModifierFlags, allowEscape: Bool = false) -> KeyboardShortcut? {
+        guard keyCode != 53 || allowEscape else { return nil } // Escape belongs to the recorder.
         var modifiers: ShortcutModifiers = []
         if flags.contains(.command) { modifiers.insert(.command) }
         if flags.contains(.option) { modifiers.insert(.option) }
@@ -155,37 +155,81 @@ extension KeyboardShortcut {
 
 // Captures locally before menu key equivalents are dispatched. No CGEvent posting.
 final class DialShortcutRecorder: NSObject, NSWindowDelegate {
+    private static let specialKeyCodes: [UInt16] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 53]
     private let panel: NSPanel
+    private let inputMode = NSSegmentedControl(labels: ["Press Keys", "Choose Special Key"], trackingMode: .selectOne, target: nil, action: nil)
+    private let specialKey = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var modifierButtons: [(NSButton, NSEvent.ModifierFlags)] = []
+    private var useSpecialKey: CustomizationButton!
     private var monitor: Any?
     private var completion: ((KeyboardShortcut?) -> Void)?
     private var resignObserver: NSObjectProtocol?
 
     init(parent: NSWindow, gesture: String, completion: @escaping (KeyboardShortcut?) -> Void) {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 450, height: 190), styleMask: [.titled], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 450, height: 310), styleMask: [.titled], backing: .buffered, defer: false)
         self.completion = completion
         super.init()
         panel.title = "Record Shortcut"
         let label = customizationLabel("Press a shortcut for \(gesture.lowercased()).", size: 17, weight: .semibold)
-        label.frame = NSRect(x: 24, y: 115, width: 402, height: 45)
-        let detail = customizationLabel("Use one key with optional ⌘ ⌥ ⌃ ⇧ modifiers.\nEscape cancels. Media keys are not supported.", secondary: true)
-        detail.frame = NSRect(x: 24, y: 58, width: 402, height: 48)
+        label.frame = NSRect(x: 24, y: 245, width: 402, height: 45)
+        let detail = customizationLabel("Use one key with optional ⌘ ⌥ ⌃ ⇧ modifiers.\nFor F1–F12, hold Fn/Globe or choose below.\nFor media controls, choose macOS Action instead.\nEscape cancels; assign it using Choose Special Key.", secondary: true)
+        detail.frame = NSRect(x: 24, y: 161, width: 402, height: 76)
+        inputMode.frame = NSRect(x: 24, y: 123, width: 402, height: 28)
+        inputMode.selectedSegment = 0
+        inputMode.target = self
+        inputMode.action = #selector(changeInputMode)
+        specialKey.frame = NSRect(x: 24, y: 78, width: 100, height: 28)
+        specialKey.addItems(withTitles: (1...12).map { "F\($0)" } + ["Esc"])
+        specialKey.setAccessibilityLabel("Special key")
+        for (index, item) in [("⌘", "Command", NSEvent.ModifierFlags.command),
+                              ("⌥", "Option", .option), ("⌃", "Control", .control), ("⇧", "Shift", .shift)].enumerated() {
+            let button = NSButton(checkboxWithTitle: item.0, target: nil, action: nil)
+            button.frame = NSRect(x: 142 + CGFloat(index) * 70, y: 80, width: 64, height: 24)
+            button.setAccessibilityLabel(item.1)
+            modifierButtons.append((button, item.2))
+            panel.contentView?.addSubview(button)
+        }
+        useSpecialKey = CustomizationButton("Use Shortcut") { [weak self] in
+            guard let self = self, self.inputMode.selectedSegment == 1,
+                  Self.specialKeyCodes.indices.contains(self.specialKey.indexOfSelectedItem) else { return }
+            let flags = self.modifierButtons.reduce(NSEvent.ModifierFlags()) { flags, item in
+                item.0.state == .on ? flags.union(item.1) : flags
+            }
+            self.finish(KeyboardShortcut.recorded(keyCode: Self.specialKeyCodes[self.specialKey.indexOfSelectedItem], flags: flags, allowEscape: true))
+        }
+        useSpecialKey.frame = NSRect(x: 302, y: 16, width: 124, height: 28)
         let cancel = CustomizationButton("Cancel") { [weak self] in self?.finish(nil) }
-        cancel.frame = NSRect(x: 330, y: 16, width: 96, height: 28)
+        cancel.frame = NSRect(x: 200, y: 16, width: 96, height: 28)
         panel.contentView?.addSubview(label)
         panel.contentView?.addSubview(detail)
         panel.contentView?.addSubview(cancel)
+        panel.contentView?.addSubview(inputMode)
+        panel.contentView?.addSubview(specialKey)
+        panel.contentView?.addSubview(useSpecialKey)
+        changeInputMode()
         parent.beginSheet(panel)
         panel.makeKey()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self, self.panel.isKeyWindow else { return event }
-            if event.keyCode == 53 { self.finish(nil) }
-            else if !event.isARepeat, let shortcut = KeyboardShortcut.recorded(keyCode: event.keyCode, flags: event.modifierFlags) {
+            if event.keyCode == 53 { self.finish(nil); return nil }
+            // Let keyboard navigation operate the picker without recording Tab,
+            // arrows or Space as the shortcut being edited.
+            guard self.inputMode.selectedSegment == 0 else { return event }
+            if !event.isARepeat, let shortcut = KeyboardShortcut.recorded(keyCode: event.keyCode, flags: event.modifierFlags) {
                 self.finish(shortcut)
             }
             return nil
         }
         resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
             object: nil, queue: .main) { [weak self] _ in self?.finish(nil) }
+    }
+
+    @objc private func changeInputMode() {
+        let choosing = inputMode.selectedSegment == 1
+        specialKey.isEnabled = choosing
+        for (button, _) in modifierButtons { button.isEnabled = choosing }
+        useSpecialKey.isEnabled = choosing
+        useSpecialKey.keyEquivalent = choosing ? "\r" : ""
     }
 
     func finish(_ shortcut: KeyboardShortcut?) {

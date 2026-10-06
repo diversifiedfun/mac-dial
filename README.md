@@ -8,6 +8,11 @@ shortcuts, application-specific actions, and improved scrolling.
 This is a **source-only development publication**. There is no signed or notarized
 Diversified Fun download yet; upstream releases do not include this fork's changes.
 
+[![Mac Dial's standard and Lightroom Classic radial pickers in Liquid Glass over a blue, orange, and purple abstract background](docs/images/liquid-glass.png)](docs/images/liquid-glass.png)
+
+*The standard picker and Lightroom Classic controls in Liquid Glass (macOS 26+).
+Hold the Dial, turn to choose, and click to select.*
+
 ## What this fork adds
 
 - A hold-to-open radial picker with Classic and optional Liquid Glass appearance.
@@ -17,6 +22,11 @@ Diversified Fun download yet; upstream releases do not include this fork's chang
 - A native Customize Dial window: standard and per-application slices, shortcut
   recording, ordering, enable/disable switches, and Undo/Redo.
 - Permission recovery guidance and cancellation of stale input when context changes.
+
+[![Customize Dial in light mode with Lightroom selected, a Photo Review slice, its keyboard shortcuts, and the radial preview](docs/images/customize-dial.png)](docs/images/customize-dial.png)
+
+*Arrange slices and assign shortcuts for each application. This Photo Review example
+maps rotation to the arrow keys and click to P. Click either screenshot to view full size.*
 
 ## Requirements and compatibility
 
@@ -71,6 +81,45 @@ Rebuilding or moving between copies can require renewing macOS privacy grants.
 See the [user guide](docs/USER_GUIDE.md) for gestures, scroll styles, contextual
 modes, brightness behavior, and customization. Add Mac Dial to Login Items manually
 if you want it to start at login.
+
+## Frequently asked questions
+
+### How do I make Microsoft Surface Dial work on Mac?
+
+Pair your Microsoft Surface Dial in macOS Bluetooth settings, [build and launch
+this Mac Dial fork](#build-from-source), and grant it Accessibility permission.
+Then hold the Dial to open the picker, turn to choose a mode, and click to select;
+see [First use](#first-use) for setup details.
+
+### Can I download a ready-to-use Mac Dial app?
+
+This fork currently requires [building from source](#build-from-source); there is
+no signed or notarized Diversified Fun download yet. Upstream Mac Dial releases
+do not include this fork's radial picker, customization, or other changes.
+
+### Which Macs and macOS versions does Mac Dial support?
+
+The deployment target is macOS 12, but publication verification covers Apple
+Silicon on macOS 27.0.1 with Xcode 27.0; older macOS versions and Intel Macs have
+not been verified. Liquid Glass requires macOS 26 or later, with Classic available
+on older systems; see [Requirements and compatibility](#requirements-and-compatibility)
+for the full testing limits.
+
+### Can I customize Surface Dial buttons and shortcuts on Mac?
+
+Yes—open **Customize Dial…** to arrange standard and per-application slices and
+assign keyboard shortcuts or macOS actions to rotation left/right, click, and
+double-click. Holding remains reserved for opening the picker; see the
+[customization guide](docs/USER_GUIDE.md#customize-dial) for details.
+
+### Does Surface Dial work with Lightroom Classic on Mac?
+
+This fork includes contextual **Remove** size controls, **Fine Tune** adjustments,
+and **Crop & Browse** navigation for Lightroom Classic using U.S. keyboard mappings;
+cloud Lightroom is not included. Activate Remove before turning to adjust its size,
+and see the [Lightroom Classic guide](docs/USER_GUIDE.md#lightroom-classic-modes) for
+shortcut details and limitations. Physical Dial use and live shortcuts still need
+further manual verification for this publication.
 
 ## Troubleshooting and limitations
 
